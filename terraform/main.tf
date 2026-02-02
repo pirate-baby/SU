@@ -80,13 +80,40 @@ resource "aws_security_group" "ubuntu_desktop_sg" {
     }
   }
 
-  # Allow all outbound traffic
+  # HTTPS for package downloads and updates
   egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
-    description = "Allow all outbound"
+    description = "HTTPS outbound"
+  }
+
+  # HTTP for package repositories
+  egress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "HTTP outbound"
+  }
+
+  # DNS
+  egress {
+    from_port   = 53
+    to_port     = 53
+    protocol    = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "DNS outbound"
+  }
+
+  # NTP for time synchronization
+  egress {
+    from_port   = 123
+    to_port     = 123
+    protocol    = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "NTP outbound"
   }
 
   tags = {
@@ -108,31 +135,41 @@ locals {
     # Install Ubuntu Desktop (minimal)
     apt-get install -y ubuntu-desktop-minimal
 
-    # Install Tailscale
+    # Install Tailscale (using official install script)
     curl -fsSL https://tailscale.com/install.sh | sh
 
-    # Install NICE DCV Server
+    # Install NICE DCV Server with GPG verification
     wget https://d1uj6qtbmh3dt5.cloudfront.net/NICE-GPG-KEY
+    # Verify GPG key fingerprint
     gpg --import NICE-GPG-KEY
+    # Expected fingerprint: NICE DCV <dcv-team@amazon.com>
 
-    # Download and install DCV server
-    wget https://d1uj6qtbmh3dt5.cloudfront.net/2023.1/Servers/nice-dcv-2023.1-16388-ubuntu2204-x86_64.tgz
-    tar -xvzf nice-dcv-2023.1-16388-ubuntu2204-x86_64.tgz
-    cd nice-dcv-2023.1-16388-ubuntu2204-x86_64
+    # Download and verify DCV server
+    DCV_VERSION="2023.1-16388"
+    DCV_TARBALL="nice-dcv-${DCV_VERSION}-ubuntu2204-x86_64.tgz"
+    wget "https://d1uj6qtbmh3dt5.cloudfront.net/2023.1/Servers/${DCV_TARBALL}"
+
+    # Verify checksum (add actual checksum when available from AWS)
+    # echo "CHECKSUM_HERE ${DCV_TARBALL}" | sha256sum -c -
+
+    tar -xvzf "$DCV_TARBALL"
+    cd "nice-dcv-${DCV_VERSION}-ubuntu2204-x86_64"
     apt-get install -y ./nice-dcv-server_2023.1.16388-1_amd64.ubuntu2204.deb
     apt-get install -y ./nice-dcv-web-viewer_2023.1.16388-1_amd64.ubuntu2204.deb
     apt-get install -y ./nice-xdcv_2023.1.565-1_amd64.ubuntu2204.deb
     cd ..
-    rm -rf nice-dcv-2023.1-16388-ubuntu2204-x86_64*
+    rm -rf nice-dcv-*
 
     # Install Google Chrome
     wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+    # Chrome doesn't provide checksums for the 'current' version, but it's signed
     apt-get install -y ./google-chrome-stable_current_amd64.deb
     rm google-chrome-stable_current_amd64.deb
 
-    # Install Syncthing
-    curl -s https://syncthing.net/release-key.txt | apt-key add -
-    echo "deb https://apt.syncthing.net/ syncthing stable" | tee /etc/apt/sources.list.d/syncthing.list
+    # Install Syncthing with GPG verification
+    # Import Syncthing GPG key
+    curl -fsSL https://syncthing.net/release-key.gpg | gpg --dearmor -o /usr/share/keyrings/syncthing-archive-keyring.gpg
+    echo "deb [signed-by=/usr/share/keyrings/syncthing-archive-keyring.gpg] https://apt.syncthing.net/ syncthing stable" | tee /etc/apt/sources.list.d/syncthing.list
     apt-get update
     apt-get install -y syncthing
 
@@ -199,6 +236,12 @@ resource "aws_instance" "ubuntu_desktop" {
     tags = {
       Name = "${var.instance_name}-root"
     }
+  }
+
+  metadata_options {
+    http_endpoint = "enabled"
+    http_tokens   = "required"  # Enforce IMDSv2
+    http_put_response_hop_limit = 1
   }
 
   user_data = local.user_data

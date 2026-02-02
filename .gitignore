@@ -26,6 +26,10 @@ terraform.rc
 # Lock file (commit this if you want to lock provider versions)
 # .terraform.lock.hcl
 
+# Terraform plan files (may contain sensitive data)
+*.tfplan
+tfplan
+
 # Python
 __pycache__/
 *.py[cod]
