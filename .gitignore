@@ -25,3 +25,30 @@ terraform.rc
 
 # Lock file (commit this if you want to lock provider versions)
 # .terraform.lock.hcl
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+.pytest_cache/
+
+# Docker
+.env
+
+# Claude workspace
+claude-workspace/
+
+# SSL certificates
+nginx/ssl/*.pem
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store

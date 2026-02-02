@@ -1,0 +1,50 @@
+services:
+  claude-executor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: claude-task-executor
+    expose:
+      - "8000"
+    volumes:
+      # Mount the host Claude binary (adjust path based on OS)
+      # Mac: /usr/local/bin/claude
+      # Ubuntu: /usr/local/bin/claude (or wherever installed)
+      - ${CLAUDE_BINARY_PATH:-/usr/local/bin/claude}:/usr/local/bin/claude:ro
+
+      # Mount Claude config directory (read-only for security)
+      - ${HOME}/.config/claude:/home/appuser/.config/claude:ro
+
+      # Mount a working directory if Claude needs to write files
+      - ${CLAUDE_WORKDIR:-./claude-workspace}:/workspace
+    environment:
+      - CLAUDE_BINARY_PATH=/usr/local/bin/claude
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - claude-network
+
+  nginx:
+    image: nginx:alpine
+    container_name: claude-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - claude-executor
+    restart: unless-stopped
+    networks:
+      - claude-network
+
+networks:
+  claude-network:
+    driver: bridge
