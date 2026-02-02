@@ -1,0 +1,22 @@
+# Copy this file to terraform.tfvars and fill in your values
+# cp terraform.tfvars.example terraform.tfvars
+
+# AWS Region
+aws_region = "us-east-1"
+
+# Network Configuration
+vpc_id    = "vpc-xxxxxxxxxxxxxxxxx"
+subnet_id = "subnet-xxxxxxxxxxxxxxxxx"
+
+# EC2 Configuration
+key_name      = "your-ssh-key-name"
+instance_type = "t3.medium"
+instance_name = "ubuntu-desktop-tailscale"
+
+# Security - SSH Access (empty list for no SSH access, rely on SSM only)
+allowed_ssh_cidrs = [
+  # "1.2.3.4/32",  # Your IP address
+]
+
+# Ubuntu user password (used for DCV login)
+instance_password = "ChangeMe!SecurePassword123"
