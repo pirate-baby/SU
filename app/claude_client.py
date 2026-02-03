@@ -21,21 +21,17 @@ class ClaudeChat:
         message: str,
         conversation_history: list = None
     ) -> AsyncGenerator[str, None]:
-        client = ClaudeSDKClient(options=self.options)
-
-        messages = conversation_history if conversation_history else []
-        messages.append(
-            UserMessage(content=[TextBlock(text=message)])
-        )
-
         try:
-            async for chunk in client.stream(messages):
-                if hasattr(chunk, 'content'):
-                    for block in chunk.content:
-                        if hasattr(block, 'text'):
-                            yield block.text
-                elif hasattr(chunk, 'delta') and hasattr(chunk.delta, 'text'):
-                    yield chunk.delta.text
+            async with ClaudeSDKClient(options=self.options) as client:
+                # Send the message using query()
+                await client.query(message)
+
+                # Receive and yield the response
+                async for msg in client.receive_response():
+                    if hasattr(msg, 'content'):
+                        for block in msg.content:
+                            if hasattr(block, 'text'):
+                                yield block.text
 
         except Exception as e:
             yield f"\n\n[Error communicating with Claude: {str(e)}]"
