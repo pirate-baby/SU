@@ -4,9 +4,11 @@ FROM python:3.12-slim
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies (curl for healthcheck)
+# Install system dependencies (curl for healthcheck, nodejs for claude binary)
 RUN apt-get update && apt-get install -y \
     curl \
+    nodejs \
+    npm \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy UV from official image (no pip needed!)
@@ -21,8 +23,8 @@ RUN uv sync --frozen --no-dev
 # Copy application code
 COPY app/ ./app/
 
-# Create a non-root user for security
-RUN useradd -m -u 1000 appuser && \
+# Create a non-root user for security (match host UID for volume access)
+RUN useradd -m -u 501 appuser && \
     chown -R appuser:appuser /app
 
 # Switch to non-root user

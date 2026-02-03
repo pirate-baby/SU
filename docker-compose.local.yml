@@ -1,0 +1,16 @@
+# Local development override
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.local.yml up
+
+services:
+  claude-executor:
+    volumes:
+      # Override .claude mount to be read-write for local development
+      - ${HOME}/.claude:/home/appuser/.claude:rw
+
+  nginx:
+    volumes:
+      # Override with local nginx config (HTTP only, no SSL)
+      - ./nginx/nginx.local.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      # Only expose HTTP port for local development
+      - "80:80"
