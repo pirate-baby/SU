@@ -38,12 +38,12 @@ fi
 
 # Use local development configuration (HTTP only, no SSL)
 echo "Starting services with local development configuration (HTTP only)..."
-docker-compose -f docker-compose.yml -f docker-compose.local.yml up --build -d
+docker compose -f docker-compose.yml -f docker-compose.local.yml up --build -d
 
 echo ""
 echo "✓ Services started successfully!"
 echo ""
 echo "Access the chat at: http://localhost"
 echo ""
-echo "To view logs: docker-compose logs -f"
-echo "To stop: docker-compose down"
+echo "To view logs: docker compose logs -f"
+echo "To stop: docker compose down"

@@ -24,10 +24,10 @@ Set `CLAUDE_OAUTH_TOKEN` environment variable to use an OAuth session token inst
 
 ```bash
 # View logs
-docker-compose logs -f
+docker compose logs -f
 
 # Stop the service
-docker-compose down
+docker compose down
 
 # Restart
 ./startup.sh

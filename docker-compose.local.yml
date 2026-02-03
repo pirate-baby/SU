@@ -1,5 +1,5 @@
 # Local development override
-# Use with: docker-compose -f docker-compose.yml -f docker-compose.local.yml up
+# Use with: docker compose -f docker-compose.yml -f docker-compose.local.yml up
 
 services:
   claude-executor:
