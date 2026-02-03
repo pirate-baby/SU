@@ -99,6 +99,12 @@ function createAssistantMessage() {
     contentDiv.className = 'message-content';
     contentDiv.id = 'current-assistant-content';
 
+    // Add thinking dots animation
+    const thinkingDots = document.createElement('div');
+    thinkingDots.className = 'thinking-dots';
+    thinkingDots.innerHTML = '<span></span><span></span><span></span>';
+    contentDiv.appendChild(thinkingDots);
+
     messageDiv.appendChild(contentDiv);
     messagesContainer.appendChild(messageDiv);
     scrollToBottom();
@@ -107,6 +113,12 @@ function createAssistantMessage() {
 function appendToAssistantMessage(chunk) {
     const contentDiv = document.getElementById('current-assistant-content');
     if (contentDiv) {
+        // Remove thinking dots on first chunk
+        const thinkingDots = contentDiv.querySelector('.thinking-dots');
+        if (thinkingDots) {
+            thinkingDots.remove();
+        }
+
         contentDiv.textContent += chunk;
         scrollToBottom();
     }
