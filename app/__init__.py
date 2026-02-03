@@ -1,1 +1,1 @@
-"""Claude Task Executor FastAPI Application."""
+"""Claude Chat FastAPI Application."""

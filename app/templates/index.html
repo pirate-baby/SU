@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude Chat</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="landing-page">
+            <h1>Claude Chat</h1>
+            <p>Start a conversation with Claude AI</p>
+            <button id="new-chat-btn" class="primary-btn">Start New Chat</button>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('new-chat-btn').addEventListener('click', async () => {
+            try {
+                const response = await fetch('/api/sessions/new', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    window.location.href = `/chat/${data.session_id}`;
+                } else {
+                    alert('Failed to create session');
+                }
+            } catch (error) {
+                console.error('Error creating session:', error);
+                alert('Error creating session');
+            }
+        });
+    </script>
+</body>
+</html>

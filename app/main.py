@@ -1,104 +1,182 @@
 """
-FastAPI application that executes tasks using the host Claude binary.
+FastAPI application with Claude chat functionality.
 """
-import subprocess
 import json
+from pathlib import Path
 from typing import Optional
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from contextlib import asynccontextmanager
 
-app = FastAPI(title="Claude Task Executor", version="1.0.0")
+from app.database import init_database
+from app.session_manager import (
+    create_session,
+    get_session,
+    session_exists,
+    save_message,
+    update_session_activity,
+    end_session,
+)
+from app.claude_client import ClaudeChat
+from app.models import SessionCreateResponse
 
 
-class TaskRequest(BaseModel):
-    """Request model for Claude task execution."""
-    prompt: str
-    claude_binary_path: str = "/usr/local/bin/claude"
-    timeout: Optional[int] = 300
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize database on startup."""
+    await init_database()
+    yield
 
 
-class TaskResponse(BaseModel):
-    """Response model for task execution."""
-    success: bool
-    output: Optional[str] = None
-    error: Optional[str] = None
+app = FastAPI(
+    title="Claude Chat Service",
+    version="2.0.0",
+    lifespan=lifespan
+)
+
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+templates = Jinja2Templates(directory="app/templates")
 
 
-@app.get("/")
-async def root():
-    """Health check endpoint."""
-    return {"status": "healthy", "service": "claude-task-executor"}
+@app.get("/", response_class=HTMLResponse)
+async def landing_page(request: Request):
+    """Serve landing page."""
+    return templates.TemplateResponse("index.html", {"request": request})
+
+
+@app.post("/api/sessions/new", response_model=SessionCreateResponse)
+async def create_new_session():
+    """Create a new chat session."""
+    session_id = await create_session()
+    return SessionCreateResponse(
+        session_id=session_id,
+        redirect_url=f"/chat/{session_id}"
+    )
+
+
+@app.get("/chat/{session_id}", response_class=HTMLResponse)
+async def chat_page(request: Request, session_id: str):
+    """Serve chat page for a session."""
+    if not await session_exists(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    return templates.TemplateResponse(
+        "chat.html",
+        {"request": request, "session_id": session_id}
+    )
+
+
+@app.post("/api/sessions/{session_id}/end")
+async def end_chat_session(session_id: str):
+    """End a chat session."""
+    if not await session_exists(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    await end_session(session_id)
+    return {"status": "ended"}
+
+
+async def send_message_history(websocket: WebSocket, session_id: str):
+    session = await get_session(session_id)
+    if session and session.messages:
+        await websocket.send_json({
+            "type": "history",
+            "messages": [
+                {"role": msg.role, "content": msg.content}
+                for msg in session.messages
+            ]
+        })
+
+
+async def stream_claude_response(websocket: WebSocket, session_id: str, user_message: str, claude: ClaudeChat):
+    session = await get_session(session_id)
+    conversation_history = claude.build_conversation_history(
+        session.messages if session else []
+    )
+
+    await websocket.send_json({"type": "assistant_start"})
+
+    full_response = ""
+    async for chunk in claude.send_message(user_message, conversation_history):
+        full_response += chunk
+        await websocket.send_json({
+            "type": "assistant_chunk",
+            "content": chunk
+        })
+
+    await save_message(session_id, "assistant", full_response)
+    await websocket.send_json({"type": "assistant_end"})
+
+
+async def handle_user_message(websocket: WebSocket, session_id: str, user_message: str, claude: ClaudeChat):
+    await save_message(session_id, "user", user_message)
+    await websocket.send_json({
+        "type": "user_message",
+        "content": user_message
+    })
+
+    try:
+        await stream_claude_response(websocket, session_id, user_message, claude)
+    except Exception as e:
+        await websocket.send_json({
+            "type": "error",
+            "content": f"Error generating response: {str(e)}"
+        })
+
+    await update_session_activity(session_id)
+
+
+@app.websocket("/ws/chat/{session_id}")
+async def websocket_chat(websocket: WebSocket, session_id: str):
+    """WebSocket endpoint for chat."""
+    await websocket.accept()
+
+    if not await session_exists(session_id):
+        await websocket.send_json({
+            "type": "error",
+            "content": "Session not found"
+        })
+        await websocket.close()
+        return
+
+    await send_message_history(websocket, session_id)
+    await update_session_activity(session_id)
+
+    claude = ClaudeChat()
+
+    try:
+        while True:
+            data = await websocket.receive_text()
+            message_data = json.loads(data)
+
+            if message_data.get("type") == "user_message":
+                user_message = message_data.get("content", "").strip()
+                if user_message:
+                    await handle_user_message(websocket, session_id, user_message, claude)
+
+    except WebSocketDisconnect:
+        print(f"WebSocket disconnected for session {session_id}")
+    except Exception as e:
+        print(f"WebSocket error: {str(e)}")
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "content": f"Connection error: {str(e)}"
+            })
+        except:
+            pass
 
 
 @app.get("/health")
 async def health_check():
-    """Detailed health check."""
-    try:
-        result = subprocess.run(
-            ["/usr/local/bin/claude", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        claude_available = result.returncode == 0
-        claude_version = result.stdout.strip() if claude_available else None
-    except Exception as e:
-        claude_available = False
-        claude_version = str(e)
-
+    """Health check endpoint."""
     return {
         "status": "healthy",
-        "claude_available": claude_available,
-        "claude_version": claude_version
+        "service": "claude-chat-service",
+        "version": "2.0.0"
     }
-
-
-@app.post("/execute", response_model=TaskResponse)
-async def execute_task(task: TaskRequest):
-    """
-    Execute a task using the Claude binary from the host system.
-
-    Args:
-        task: TaskRequest containing the prompt and configuration
-
-    Returns:
-        TaskResponse with execution results
-    """
-    try:
-        # Execute claude with the provided prompt
-        result = subprocess.run(
-            [task.claude_binary_path, "code", task.prompt],
-            capture_output=True,
-            text=True,
-            timeout=task.timeout
-        )
-
-        if result.returncode == 0:
-            return TaskResponse(
-                success=True,
-                output=result.stdout
-            )
-        else:
-            return TaskResponse(
-                success=False,
-                error=f"Claude exited with code {result.returncode}: {result.stderr}"
-            )
-
-    except subprocess.TimeoutExpired:
-        raise HTTPException(
-            status_code=408,
-            detail=f"Task execution timed out after {task.timeout} seconds"
-        )
-    except FileNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Claude binary not found at {task.claude_binary_path}"
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Unexpected error: {str(e)}"
-        )
 
 
 if __name__ == "__main__":
