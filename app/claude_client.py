@@ -2,15 +2,22 @@
 Claude SDK client wrapper for chat functionality.
 """
 import os
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions, UserMessage, TextBlock
+from app.config import settings
 
 
 class ClaudeChat:
     """Wrapper for Claude SDK client."""
 
-    def __init__(self):
+    def __init__(self, oauth_token: Optional[str] = None):
         print("Initializing ClaudeChat with ClaudeAgentOptions")
+
+        # If OAuth token is provided, set it in the environment
+        if oauth_token:
+            os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = oauth_token
+            print("Using configured OAuth session token for authentication")
+
         try:
             self.options = ClaudeAgentOptions(
                 allowed_tools=["Read", "Glob", "Grep", "WebSearch", "WebFetch"],

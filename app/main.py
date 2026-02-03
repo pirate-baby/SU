@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from contextlib import asynccontextmanager
 
+from app.config import settings
 from app.database import init_database
 from app.session_manager import (
     create_session,
@@ -154,7 +155,11 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
 
     try:
         print(f"Initializing ClaudeChat for session {session_id}")
-        claude = ClaudeChat()
+        # Only pass token if it's actually set to avoid interfering with claude login auth
+        if settings.claude_oauth_token:
+            claude = ClaudeChat(oauth_token=settings.claude_oauth_token)
+        else:
+            claude = ClaudeChat()
         print(f"ClaudeChat initialized successfully for session {session_id}")
     except Exception as e:
         print(f"Failed to initialize ClaudeChat: {str(e)}")

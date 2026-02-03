@@ -17,6 +17,7 @@ services:
     environment:
       - CLAUDE_BINARY_PATH=/usr/local/bin/claude
       - PYTHONUNBUFFERED=1
+      - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN:-}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]

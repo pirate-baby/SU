@@ -15,6 +15,8 @@ docker-compose up -d
 open http://localhost
 ```
 
+Optionally, set `CLAUDE_OAUTH_TOKEN` environment variable to use an OAuth session token instead of `claude login`.
+
 ## Features
 
 - WebSocket chat with Claude AI
