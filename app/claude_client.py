@@ -12,11 +12,16 @@ class ClaudeChat:
 
     def __init__(self, oauth_token: Optional[str] = None):
         print("Initializing ClaudeChat with ClaudeAgentOptions")
+        print(f"oauth_token provided: {bool(oauth_token)}")
+        print(f"oauth_token value (first 10 chars): {oauth_token[:10] if oauth_token else 'None'}")
 
         # If OAuth token is provided, set it in the environment
         if oauth_token:
             os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = oauth_token
+            print(f"Set CLAUDE_CODE_OAUTH_TOKEN in environment")
             print("Using configured OAuth session token for authentication")
+        else:
+            print("No oauth_token provided, will rely on claude login authentication")
 
         try:
             self.options = ClaudeAgentOptions(
