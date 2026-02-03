@@ -27,28 +27,13 @@ case "$OS" in
         ;;
 esac
 
-# Auto-detect Claude binary location
-if [ -n "$CLAUDE_BINARY_PATH" ]; then
-    echo "Using CLAUDE_BINARY_PATH from environment: $CLAUDE_BINARY_PATH"
-elif command -v claude &> /dev/null; then
-    CLAUDE_BINARY_PATH=$(which claude)
-    echo "Found Claude at: $CLAUDE_BINARY_PATH"
-else
-    echo "Error: Claude binary not found"
-    echo "Please install Claude Code CLI first:"
-    echo "  https://docs.anthropic.com/en/docs/claude-code"
+# Check for .claude directory (needed for authentication)
+if [ ! -d "$HOME/.claude" ]; then
+    echo "Warning: $HOME/.claude directory not found"
+    echo "Make sure you've authenticated with Claude Code CLI:"
+    echo "  claude login"
     echo ""
-    echo "Or set CLAUDE_BINARY_PATH environment variable to the path of your Claude binary"
-    exit 1
-fi
-
-# Export for docker-compose
-export CLAUDE_BINARY_PATH
-
-# Check if user is authenticated with Claude
-echo "Checking Claude authentication..."
-if ! "$CLAUDE_BINARY_PATH" --version &> /dev/null; then
-    echo "Warning: Unable to verify Claude CLI. Continuing anyway..."
+    echo "Continuing anyway (you can set CLAUDE_OAUTH_TOKEN environment variable instead)..."
 fi
 
 # Use local development configuration (HTTP only, no SSL)

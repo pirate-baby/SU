@@ -7,15 +7,9 @@ services:
     expose:
       - "8000"
     volumes:
-      # Mount the host Claude binary (adjust path based on OS)
-      # Mac: /usr/local/bin/claude
-      # Ubuntu: /usr/local/bin/claude (or wherever installed)
-      - ${CLAUDE_BINARY_PATH:-/usr/local/bin/claude}:/usr/local/bin/claude:ro
-
       - ${HOME}/.claude:/home/appuser/.claude:ro
       - ${CLAUDE_WORKDIR:-./claude-workspace}:/workspace
     environment:
-      - CLAUDE_BINARY_PATH=/usr/local/bin/claude
       - PYTHONUNBUFFERED=1
       - CLAUDE_OAUTH_TOKEN=${CLAUDE_OAUTH_TOKEN:-}
     restart: unless-stopped

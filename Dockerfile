@@ -11,6 +11,9 @@ RUN apt-get update && apt-get install -y \
     npm \
     && rm -rf /var/lib/apt/lists/*
 
+# Install Claude Code CLI globally using npx
+RUN npm install -g @anthropic-ai/claude-code
+
 # Copy UV from official image (no pip needed!)
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
