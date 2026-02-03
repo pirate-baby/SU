@@ -10,7 +10,6 @@ OS=$(uname -s)
 case "$OS" in
     Darwin)
         echo "Detected macOS"
-        CLAUDE_BINARY_PATH="/usr/local/bin/claude"
         ;;
     Linux)
         echo "Detected Linux"
@@ -21,7 +20,6 @@ case "$OS" in
                 echo "Running on Ubuntu/Debian"
             fi
         fi
-        CLAUDE_BINARY_PATH="/usr/local/bin/claude"
         ;;
     *)
         echo "Unsupported OS: $OS"
@@ -29,11 +27,18 @@ case "$OS" in
         ;;
 esac
 
-# Check if Claude binary exists
-if [ ! -f "$CLAUDE_BINARY_PATH" ]; then
-    echo "Error: Claude binary not found at $CLAUDE_BINARY_PATH"
+# Auto-detect Claude binary location
+if [ -n "$CLAUDE_BINARY_PATH" ]; then
+    echo "Using CLAUDE_BINARY_PATH from environment: $CLAUDE_BINARY_PATH"
+elif command -v claude &> /dev/null; then
+    CLAUDE_BINARY_PATH=$(which claude)
+    echo "Found Claude at: $CLAUDE_BINARY_PATH"
+else
+    echo "Error: Claude binary not found"
     echo "Please install Claude Code CLI first:"
     echo "  https://docs.anthropic.com/en/docs/claude-code"
+    echo ""
+    echo "Or set CLAUDE_BINARY_PATH environment variable to the path of your Claude binary"
     exit 1
 fi
 
