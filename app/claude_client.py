@@ -12,7 +12,7 @@ class ClaudeChat:
     def __init__(self):
         self.options = ClaudeAgentOptions(
             allowed_tools=["Read", "Glob", "Grep", "WebSearch", "WebFetch"],
-            permission_mode="prompt",
+            permission_mode="default",
             max_turns=20,
         )
 
