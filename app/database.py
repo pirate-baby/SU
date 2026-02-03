@@ -8,11 +8,21 @@ from typing import Optional
 DATABASE_PATH = Path("/workspace/sessions.db")
 
 
-async def get_db() -> aiosqlite.Connection:
-    """Get database connection."""
-    db = await aiosqlite.connect(DATABASE_PATH)
-    db.row_factory = aiosqlite.Row
-    return db
+def get_db():
+    """Get database connection as an async context manager."""
+    # aiosqlite.connect returns a context manager that yields a connection
+    # The connection's row_factory needs to be set after connection is established
+    # We'll use a helper to set row_factory
+    class DBConnection:
+        async def __aenter__(self):
+            self.conn = await aiosqlite.connect(DATABASE_PATH)
+            self.conn.row_factory = aiosqlite.Row
+            return self.conn
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            await self.conn.close()
+
+    return DBConnection()
 
 
 async def init_database():
