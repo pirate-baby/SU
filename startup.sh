@@ -33,7 +33,7 @@ if [ ! -d "$HOME/.claude" ]; then
     echo "Make sure you've authenticated with Claude Code CLI:"
     echo "  claude login"
     echo ""
-    echo "Continuing anyway (you can set CLAUDE_OAUTH_TOKEN environment variable instead)..."
+    echo "Continuing anyway (you can set CLAUDE_CODE_OAUTH_TOKEN environment variable instead)..."
 fi
 
 # Use local development configuration (HTTP only, no SSL)

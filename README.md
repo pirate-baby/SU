@@ -18,7 +18,7 @@ Then access the chat at http://localhost
 
 ## Optional Configuration
 
-Set `CLAUDE_OAUTH_TOKEN` environment variable to use an OAuth session token instead of `claude login`.
+Set `CLAUDE_CODE_OAUTH_TOKEN` environment variable to use an OAuth session token instead of `claude login`.
 
 ## Managing the Service
 

@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
-    claude_oauth_token: Optional[str] = None
+    claude_code_oauth_token: Optional[str] = None
 
     model_config = SettingsConfigDict(
         env_file=".env",

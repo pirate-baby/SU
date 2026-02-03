@@ -154,13 +154,11 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
     await update_session_activity(session_id)
 
     try:
-        print(f"Initializing ClaudeChat for session {session_id}")
         # Only pass token if it's actually set to avoid interfering with claude login auth
-        if settings.claude_oauth_token:
-            claude = ClaudeChat(oauth_token=settings.claude_oauth_token)
+        if settings.claude_code_oauth_token:
+            claude = ClaudeChat(oauth_token=settings.claude_code_oauth_token)
         else:
             claude = ClaudeChat()
-        print(f"ClaudeChat initialized successfully for session {session_id}")
     except Exception as e:
         print(f"Failed to initialize ClaudeChat: {str(e)}")
         await websocket.send_json({
