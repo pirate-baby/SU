@@ -12,10 +12,7 @@ services:
       # Ubuntu: /usr/local/bin/claude (or wherever installed)
       - ${CLAUDE_BINARY_PATH:-/usr/local/bin/claude}:/usr/local/bin/claude:ro
 
-      # Mount Claude config directory (read-only for security)
-      - ${HOME}/.config/claude:/home/appuser/.config/claude:ro
-
-      # Mount a working directory if Claude needs to write files
+      - ${HOME}/.claude:/home/appuser/.claude:ro
       - ${CLAUDE_WORKDIR:-./claude-workspace}:/workspace
     environment:
       - CLAUDE_BINARY_PATH=/usr/local/bin/claude

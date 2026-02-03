@@ -5,10 +5,13 @@ FastAPI service that provides a web chat interface using the Claude Agent SDK.
 ## Quick Start
 
 ```bash
-# Start the service
+# 1. Authenticate with Claude Code (uses your Claude Max subscription)
+claude login
+
+# 2. Start the service
 docker-compose up -d
 
-# Access the chat
+# 3. Access the chat
 open http://localhost
 ```
 
@@ -22,5 +25,6 @@ open http://localhost
 ## Requirements
 
 - Docker and Docker Compose
-- Claude binary mounted from host at `/usr/local/bin/claude`
-- Claude config directory at `~/.config/claude`
+- Claude Code CLI installed and authenticated (`claude login`)
+- Claude Pro or Max subscription
+- Claude binary at `/usr/local/bin/claude`

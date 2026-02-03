@@ -23,10 +23,8 @@ class ClaudeChat:
     ) -> AsyncGenerator[str, None]:
         try:
             async with ClaudeSDKClient(options=self.options) as client:
-                # Send the message using query()
                 await client.query(message)
 
-                # Receive and yield the response
                 async for msg in client.receive_response():
                     if hasattr(msg, 'content'):
                         for block in msg.content:
