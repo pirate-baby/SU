@@ -131,9 +131,17 @@ async def handle_user_message(websocket: WebSocket, session_id: str, user_messag
 @app.websocket("/ws/chat/{session_id}")
 async def websocket_chat(websocket: WebSocket, session_id: str):
     """WebSocket endpoint for chat."""
-    await websocket.accept()
+    print(f"WebSocket connection attempt for session {session_id}")
+
+    try:
+        await websocket.accept()
+        print(f"WebSocket accepted for session {session_id}")
+    except Exception as e:
+        print(f"Failed to accept WebSocket: {str(e)}")
+        return
 
     if not await session_exists(session_id):
+        print(f"Session {session_id} not found")
         await websocket.send_json({
             "type": "error",
             "content": "Session not found"
@@ -144,7 +152,18 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
     await send_message_history(websocket, session_id)
     await update_session_activity(session_id)
 
-    claude = ClaudeChat()
+    try:
+        print(f"Initializing ClaudeChat for session {session_id}")
+        claude = ClaudeChat()
+        print(f"ClaudeChat initialized successfully for session {session_id}")
+    except Exception as e:
+        print(f"Failed to initialize ClaudeChat: {str(e)}")
+        await websocket.send_json({
+            "type": "error",
+            "content": f"Failed to initialize Claude client: {str(e)}"
+        })
+        await websocket.close()
+        return
 
     try:
         while True:
@@ -159,7 +178,9 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
     except WebSocketDisconnect:
         print(f"WebSocket disconnected for session {session_id}")
     except Exception as e:
-        print(f"WebSocket error: {str(e)}")
+        print(f"WebSocket error for session {session_id}: {str(e)}")
+        import traceback
+        traceback.print_exc()
         try:
             await websocket.send_json({
                 "type": "error",
