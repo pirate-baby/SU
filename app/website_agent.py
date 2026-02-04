@@ -8,6 +8,19 @@ import platform
 from pathlib import Path
 from typing import Any
 
+import inspect
+
+from mcp.server import Server as _McpServer
+
+# Monkey-patch: mcp 0.9.x removed the `version` kwarg from Server.__init__,
+# but claude-agent-sdk's create_sdk_mcp_server still passes it.
+_orig_server_init = _McpServer.__init__
+if "version" not in inspect.signature(_orig_server_init).parameters:
+    def _patched_server_init(self, name, **kwargs):
+        kwargs.pop("version", None)
+        return _orig_server_init(self, name, **kwargs)
+    _McpServer.__init__ = _patched_server_init
+
 from claude_agent_sdk import (
     ClaudeAgentOptions,
     ClaudeSDKClient,
@@ -245,6 +258,5 @@ async def browse_website(args: dict[str, Any]) -> dict[str, Any]:
 
 website_mcp_server = create_sdk_mcp_server(
     name="website",
-    version="1.0.0",
     tools=[browse_website],
 )
