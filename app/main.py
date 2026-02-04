@@ -110,7 +110,8 @@ async def _drain_subagent_events(websocket: WebSocket, stop: asyncio.Event):
             logger.info("Draining subagent event: %s", event.get("type"))
             await websocket.send_json({
                 "type": "subagent_event",
-                **event,
+                "subtype": event.get("type"),
+                "data": event,
             })
         except asyncio.TimeoutError:
             continue

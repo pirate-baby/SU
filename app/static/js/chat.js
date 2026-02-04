@@ -339,22 +339,25 @@ function appendSubagentEvent(data) {
     const log = _getOrCreateSubagentLog();
     if (!log) return;
 
+    const subtype = data.subtype;
+    const ev = data.data || {};
+
     const line = document.createElement('div');
     line.className = 'subagent-log-line';
 
-    if (data.type === 'subagent_tool') {
-        const name = (data.name || '').replace('mcp__playwright__', '');
-        const input = data.input || {};
+    if (subtype === 'subagent_tool') {
+        const name = (ev.name || '').replace('mcp__playwright__', '');
+        const input = ev.input || {};
         let detail = '';
         if (input.url) detail = input.url;
         else if (input.ref) detail = input.ref;
         else if (input.text) detail = input.text.slice(0, 80);
         line.innerHTML = `<span class="subagent-tool-name">${name}</span> ${detail ? '<span class="subagent-tool-detail">' + escapeHtml(detail) + '</span>' : ''}`;
-    } else if (data.type === 'subagent_text') {
-        line.textContent = data.content || '';
+    } else if (subtype === 'subagent_text') {
+        line.textContent = ev.content || '';
         line.className += ' subagent-log-text';
     } else {
-        line.textContent = data.message || '';
+        line.textContent = ev.message || '';
         line.className += ' subagent-log-status';
     }
 
