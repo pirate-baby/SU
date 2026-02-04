@@ -23,6 +23,7 @@ from app.session_manager import (
 from app.claude_client import ClaudeChat
 from app.memory_manager import on_user_message, on_session_end
 from app.models import SessionCreateResponse
+from app.website_agent import subagent_event_queue
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -97,38 +98,67 @@ async def send_message_history(websocket: WebSocket, session_id: str):
         })
 
 
+async def _drain_subagent_events(websocket: WebSocket, stop: asyncio.Event):
+    """Forward subagent progress events to the websocket until stop is set."""
+    while not stop.is_set():
+        try:
+            event = await asyncio.wait_for(subagent_event_queue.get(), timeout=0.25)
+            await websocket.send_json({
+                "type": "subagent_event",
+                **event,
+            })
+        except asyncio.TimeoutError:
+            continue
+        except Exception:
+            break
+
+
 async def stream_claude_response(websocket: WebSocket, session_id: str, user_message: str, claude: ClaudeChat):
     await websocket.send_json({"type": "assistant_start"})
 
-    full_response = ""
-    async for event in claude.send_message(user_message):
-        event_type = event["type"]
+    # Drain any stale events from a previous call
+    while not subagent_event_queue.empty():
+        try:
+            subagent_event_queue.get_nowait()
+        except asyncio.QueueEmpty:
+            break
 
-        if event_type == "text":
-            full_response += event["content"]
-            await websocket.send_json({
-                "type": "assistant_chunk",
-                "content": event["content"]
-            })
-        elif event_type == "tool_use":
-            await websocket.send_json({
-                "type": "tool_use",
-                "id": event["id"],
-                "name": event["name"],
-                "input": event["input"],
-            })
-        elif event_type == "tool_result":
-            await websocket.send_json({
-                "type": "tool_result",
-                "tool_use_id": event["tool_use_id"],
-                "content": event["content"],
-                "is_error": event["is_error"],
-            })
-        elif event_type == "error":
-            await websocket.send_json({
-                "type": "error",
-                "content": event["content"]
-            })
+    stop_drain = asyncio.Event()
+    drain_task = asyncio.create_task(_drain_subagent_events(websocket, stop_drain))
+
+    full_response = ""
+    try:
+        async for event in claude.send_message(user_message):
+            event_type = event["type"]
+
+            if event_type == "text":
+                full_response += event["content"]
+                await websocket.send_json({
+                    "type": "assistant_chunk",
+                    "content": event["content"]
+                })
+            elif event_type == "tool_use":
+                await websocket.send_json({
+                    "type": "tool_use",
+                    "id": event["id"],
+                    "name": event["name"],
+                    "input": event["input"],
+                })
+            elif event_type == "tool_result":
+                await websocket.send_json({
+                    "type": "tool_result",
+                    "tool_use_id": event["tool_use_id"],
+                    "content": event["content"],
+                    "is_error": event["is_error"],
+                })
+            elif event_type == "error":
+                await websocket.send_json({
+                    "type": "error",
+                    "content": event["content"]
+                })
+    finally:
+        stop_drain.set()
+        await drain_task
 
     await save_message(session_id, "assistant", full_response)
     await websocket.send_json({"type": "assistant_end"})

@@ -26,9 +26,14 @@ if "version" not in inspect.signature(_orig_server_init).parameters:
     _McpServer.__init__ = _patched_server_init
 
 from claude_agent_sdk import (
+    AssistantMessage,
     ClaudeAgentOptions,
     ClaudeSDKClient,
     ResultMessage,
+    SystemMessage,
+    TextBlock,
+    ToolUseBlock,
+    UserMessage,
     create_sdk_mcp_server,
     tool,
 )
@@ -39,6 +44,10 @@ logger = logging.getLogger(__name__)
 
 # Maximum seconds to wait for the subagent to finish browsing.
 SUBAGENT_TIMEOUT_SECONDS = 120
+
+# Module-level queue for streaming subagent progress to the frontend.
+# Consumers (e.g. main.py) can drain this while the tool runs.
+subagent_event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
 
 def _get_chrome_user_data_dir() -> str:
@@ -196,6 +205,12 @@ async def browse_website(args: dict[str, Any]) -> dict[str, Any]:
 
         async def _run_subagent():
             nonlocal structured_result, text_result
+
+            def _emit(event: dict[str, Any]):
+                subagent_event_queue.put_nowait(event)
+
+            _emit({"type": "subagent_status", "message": f"Launching browser for {config.url}"})
+
             async with ClaudeSDKClient(options=subagent_options) as client:
                 await client.query(prompt)
 
@@ -203,16 +218,37 @@ async def browse_website(args: dict[str, Any]) -> dict[str, Any]:
                     logger.info(
                         "Subagent message: type=%s", type(message).__name__
                     )
-                    if isinstance(message, ResultMessage):
+
+                    if isinstance(message, SystemMessage):
+                        if message.subtype == "init":
+                            _emit({"type": "subagent_status", "message": "Subagent connected"})
+
+                    elif isinstance(message, AssistantMessage):
+                        for block in message.content:
+                            if isinstance(block, ToolUseBlock):
+                                _emit({
+                                    "type": "subagent_tool",
+                                    "name": block.name,
+                                    "input": block.input,
+                                })
+                            elif isinstance(block, TextBlock):
+                                _emit({
+                                    "type": "subagent_text",
+                                    "content": block.text[:500],
+                                })
+
+                    elif isinstance(message, ResultMessage):
                         if message.structured_output:
                             structured_result = message.structured_output
                         elif message.result:
                             text_result = message.result
 
                         if message.is_error:
+                            _emit({"type": "subagent_status", "message": f"Error: {message.result or 'Unknown'}"})
                             raise RuntimeError(
                                 message.result or "Subagent error"
                             )
+                        _emit({"type": "subagent_status", "message": "Done"})
 
         await asyncio.wait_for(
             _run_subagent(), timeout=SUBAGENT_TIMEOUT_SECONDS

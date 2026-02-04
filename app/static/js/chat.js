@@ -86,6 +86,10 @@ function handleMessage(data) {
             appendToolResult(data);
             break;
 
+        case 'subagent_event':
+            appendSubagentEvent(data);
+            break;
+
         case 'assistant_end':
             finalizeAssistantMessage();
             break;
@@ -304,7 +308,70 @@ function appendToolResult(data) {
     scrollToBottom();
 }
 
+function _getOrCreateSubagentLog() {
+    // Find the currently-running tool call and get/create its log container
+    let log = document.getElementById('subagent-log');
+    if (log) return log;
+
+    // Find the last pending (running) tool call
+    const lastEntry = [...pendingToolCalls.values()].pop();
+    if (!lastEntry) return null;
+
+    log = document.createElement('div');
+    log.id = 'subagent-log';
+    log.className = 'subagent-log';
+
+    const label = document.createElement('div');
+    label.className = 'tool-section-label';
+    label.textContent = 'Subagent Activity';
+    log.appendChild(label);
+
+    const body = lastEntry.querySelector('.tool-call-body');
+    if (body) {
+        body.appendChild(log);
+        // Auto-open the details so the user can see progress
+        lastEntry.open = true;
+    }
+    return log;
+}
+
+function appendSubagentEvent(data) {
+    const log = _getOrCreateSubagentLog();
+    if (!log) return;
+
+    const line = document.createElement('div');
+    line.className = 'subagent-log-line';
+
+    if (data.type === 'subagent_tool') {
+        const name = (data.name || '').replace('mcp__playwright__', '');
+        const input = data.input || {};
+        let detail = '';
+        if (input.url) detail = input.url;
+        else if (input.ref) detail = input.ref;
+        else if (input.text) detail = input.text.slice(0, 80);
+        line.innerHTML = `<span class="subagent-tool-name">${name}</span> ${detail ? '<span class="subagent-tool-detail">' + escapeHtml(detail) + '</span>' : ''}`;
+    } else if (data.type === 'subagent_text') {
+        line.textContent = data.content || '';
+        line.className += ' subagent-log-text';
+    } else {
+        line.textContent = data.message || '';
+        line.className += ' subagent-log-status';
+    }
+
+    log.appendChild(line);
+    scrollToBottom();
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
 function finalizeAssistantMessage() {
+    // Remove the subagent log id so a fresh one is created next time
+    const log = document.getElementById('subagent-log');
+    if (log) log.id = '';
     const messageDiv = document.getElementById('current-assistant-message');
     const contentDiv = document.getElementById('current-assistant-content');
 
