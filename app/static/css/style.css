@@ -279,6 +279,131 @@ body {
     background: #555;
 }
 
+/* Tool calls (collapsed <details> within assistant messages) */
+.tool-call {
+    margin: 8px 0;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    background: #f9fafb;
+    font-size: 0.9em;
+    overflow: hidden;
+}
+
+.tool-call[open] {
+    border-color: #9ca3af;
+}
+
+.tool-call-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+    background: #f3f4f6;
+    border-bottom: 1px solid transparent;
+}
+
+.tool-call[open] .tool-call-summary {
+    border-bottom-color: #d1d5db;
+}
+
+.tool-call-summary::-webkit-details-marker {
+    display: none;
+}
+
+.tool-call-summary::before {
+    content: '\25B6';
+    font-size: 0.65em;
+    color: #6b7280;
+    transition: transform 0.15s;
+}
+
+.tool-call[open] .tool-call-summary::before {
+    transform: rotate(90deg);
+}
+
+.tool-icon {
+    font-size: 1em;
+    color: #6b7280;
+}
+
+.tool-name {
+    font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+    font-weight: 500;
+    color: #374151;
+    flex: 1;
+}
+
+.tool-status {
+    font-size: 0.75em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+
+.tool-status.running {
+    background: #dbeafe;
+    color: #1d4ed8;
+}
+
+.tool-status.done {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.tool-status.error {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.tool-call-body {
+    padding: 10px 12px;
+}
+
+.tool-section {
+    margin-bottom: 8px;
+}
+
+.tool-section:last-child {
+    margin-bottom: 0;
+}
+
+.tool-section-label {
+    font-size: 0.75em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #6b7280;
+    margin-bottom: 4px;
+}
+
+.tool-data {
+    font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.85em;
+    background: #1f2937;
+    color: #e5e7eb;
+    padding: 8px 10px;
+    border-radius: 4px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.tool-data-error {
+    background: #450a0a;
+    color: #fca5a5;
+}
+
+.text-content {
+    white-space: pre-wrap;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .message-content {

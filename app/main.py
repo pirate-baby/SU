@@ -100,12 +100,34 @@ async def stream_claude_response(websocket: WebSocket, session_id: str, user_mes
     await websocket.send_json({"type": "assistant_start"})
 
     full_response = ""
-    async for chunk in claude.send_message(user_message, conversation_history):
-        full_response += chunk
-        await websocket.send_json({
-            "type": "assistant_chunk",
-            "content": chunk
-        })
+    async for event in claude.send_message(user_message, conversation_history):
+        event_type = event["type"]
+
+        if event_type == "text":
+            full_response += event["content"]
+            await websocket.send_json({
+                "type": "assistant_chunk",
+                "content": event["content"]
+            })
+        elif event_type == "tool_use":
+            await websocket.send_json({
+                "type": "tool_use",
+                "id": event["id"],
+                "name": event["name"],
+                "input": event["input"],
+            })
+        elif event_type == "tool_result":
+            await websocket.send_json({
+                "type": "tool_result",
+                "tool_use_id": event["tool_use_id"],
+                "content": event["content"],
+                "is_error": event["is_error"],
+            })
+        elif event_type == "error":
+            await websocket.send_json({
+                "type": "error",
+                "content": event["content"]
+            })
 
     await save_message(session_id, "assistant", full_response)
     await websocket.send_json({"type": "assistant_end"})

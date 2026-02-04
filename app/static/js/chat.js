@@ -12,6 +12,9 @@ const statusIndicator = document.getElementById('status');
 const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 const wsUrl = `${wsProtocol}//${window.location.host}/ws/chat/${SESSION_ID}`;
 
+// Track pending tool calls so we can pair results with their call
+const pendingToolCalls = new Map();
+
 function connect() {
     setStatus('Connecting...', 'warning');
 
@@ -75,6 +78,14 @@ function handleMessage(data) {
             appendToAssistantMessage(data.content);
             break;
 
+        case 'tool_use':
+            appendToolCall(data);
+            break;
+
+        case 'tool_result':
+            appendToolResult(data);
+            break;
+
         case 'assistant_end':
             finalizeAssistantMessage();
             break;
@@ -110,18 +121,187 @@ function createAssistantMessage() {
     scrollToBottom();
 }
 
-function appendToAssistantMessage(chunk) {
+function removeThinkingDots() {
     const contentDiv = document.getElementById('current-assistant-content');
     if (contentDiv) {
-        // Remove thinking dots on first chunk
-        const thinkingDots = contentDiv.querySelector('.thinking-dots');
-        if (thinkingDots) {
-            thinkingDots.remove();
+        const dots = contentDiv.querySelector('.thinking-dots');
+        if (dots) dots.remove();
+    }
+}
+
+function appendToAssistantMessage(chunk) {
+    const contentDiv = document.getElementById('current-assistant-content');
+    if (!contentDiv) return;
+
+    removeThinkingDots();
+
+    // Append text to the last text node, or create one
+    let textSpan = contentDiv.querySelector('.text-content:last-of-type');
+    if (!textSpan || contentDiv.lastElementChild !== textSpan) {
+        textSpan = document.createElement('span');
+        textSpan.className = 'text-content';
+        contentDiv.appendChild(textSpan);
+    }
+    textSpan.textContent += chunk;
+    scrollToBottom();
+}
+
+function formatToolInput(input) {
+    if (typeof input === 'string') return input;
+    try {
+        return JSON.stringify(input, null, 2);
+    } catch {
+        return String(input);
+    }
+}
+
+function formatToolContent(content) {
+    if (content == null) return '(no output)';
+    if (typeof content === 'string') {
+        // Try to pretty-print if it looks like JSON
+        try {
+            const parsed = JSON.parse(content);
+            return JSON.stringify(parsed, null, 2);
+        } catch {
+            return content;
+        }
+    }
+    if (Array.isArray(content)) {
+        return content.map(block => {
+            if (block.type === 'text') return block.text;
+            return JSON.stringify(block, null, 2);
+        }).join('\n');
+    }
+    return JSON.stringify(content, null, 2);
+}
+
+function appendToolCall(data) {
+    const contentDiv = document.getElementById('current-assistant-content');
+    if (!contentDiv) return;
+
+    removeThinkingDots();
+
+    const details = document.createElement('details');
+    details.className = 'tool-call';
+    details.id = `tool-call-${data.id}`;
+
+    const summary = document.createElement('summary');
+    summary.className = 'tool-call-summary';
+
+    const icon = document.createElement('span');
+    icon.className = 'tool-icon';
+    icon.textContent = '\u2699';
+
+    const label = document.createElement('span');
+    label.className = 'tool-name';
+    label.textContent = data.name;
+
+    const status = document.createElement('span');
+    status.className = 'tool-status running';
+    status.textContent = 'running';
+
+    summary.appendChild(icon);
+    summary.appendChild(label);
+    summary.appendChild(status);
+    details.appendChild(summary);
+
+    const body = document.createElement('div');
+    body.className = 'tool-call-body';
+
+    const inputSection = document.createElement('div');
+    inputSection.className = 'tool-section';
+    const inputLabel = document.createElement('div');
+    inputLabel.className = 'tool-section-label';
+    inputLabel.textContent = 'Input';
+    const inputPre = document.createElement('pre');
+    inputPre.className = 'tool-data';
+    inputPre.textContent = formatToolInput(data.input);
+    inputSection.appendChild(inputLabel);
+    inputSection.appendChild(inputPre);
+    body.appendChild(inputSection);
+
+    const resultSection = document.createElement('div');
+    resultSection.className = 'tool-section tool-result-section';
+    resultSection.id = `tool-result-section-${data.id}`;
+    resultSection.style.display = 'none';
+    body.appendChild(resultSection);
+
+    details.appendChild(body);
+    contentDiv.appendChild(details);
+
+    pendingToolCalls.set(data.id, details);
+    scrollToBottom();
+}
+
+function appendToolResult(data) {
+    const details = pendingToolCalls.get(data.tool_use_id);
+
+    if (details) {
+        // Update status badge
+        const status = details.querySelector('.tool-status');
+        if (status) {
+            status.classList.remove('running');
+            if (data.is_error) {
+                status.classList.add('error');
+                status.textContent = 'error';
+            } else {
+                status.classList.add('done');
+                status.textContent = 'done';
+            }
         }
 
-        contentDiv.textContent += chunk;
-        scrollToBottom();
+        // Fill in result section
+        const resultSection = details.querySelector('.tool-result-section');
+        if (resultSection) {
+            resultSection.style.display = '';
+            const resultLabel = document.createElement('div');
+            resultLabel.className = 'tool-section-label';
+            resultLabel.textContent = 'Result';
+            const resultPre = document.createElement('pre');
+            resultPre.className = 'tool-data';
+            if (data.is_error) resultPre.classList.add('tool-data-error');
+            resultPre.textContent = formatToolContent(data.content);
+            resultSection.appendChild(resultLabel);
+            resultSection.appendChild(resultPre);
+        }
+
+        pendingToolCalls.delete(data.tool_use_id);
+    } else {
+        // Orphan result — render inline
+        const contentDiv = document.getElementById('current-assistant-content');
+        if (!contentDiv) return;
+
+        const details = document.createElement('details');
+        details.className = 'tool-call';
+
+        const summary = document.createElement('summary');
+        summary.className = 'tool-call-summary';
+        const icon = document.createElement('span');
+        icon.className = 'tool-icon';
+        icon.textContent = '\u2699';
+        const label = document.createElement('span');
+        label.className = 'tool-name';
+        label.textContent = `Result (${data.tool_use_id.slice(0, 8)})`;
+        const statusEl = document.createElement('span');
+        statusEl.className = data.is_error ? 'tool-status error' : 'tool-status done';
+        statusEl.textContent = data.is_error ? 'error' : 'done';
+        summary.appendChild(icon);
+        summary.appendChild(label);
+        summary.appendChild(statusEl);
+        details.appendChild(summary);
+
+        const body = document.createElement('div');
+        body.className = 'tool-call-body';
+        const resultPre = document.createElement('pre');
+        resultPre.className = 'tool-data';
+        if (data.is_error) resultPre.classList.add('tool-data-error');
+        resultPre.textContent = formatToolContent(data.content);
+        body.appendChild(resultPre);
+        details.appendChild(body);
+
+        contentDiv.appendChild(details);
     }
+    scrollToBottom();
 }
 
 function finalizeAssistantMessage() {
@@ -130,6 +310,17 @@ function finalizeAssistantMessage() {
 
     if (messageDiv) messageDiv.id = '';
     if (contentDiv) contentDiv.id = '';
+
+    // Mark any still-pending tool calls as done
+    pendingToolCalls.forEach((details) => {
+        const status = details.querySelector('.tool-status.running');
+        if (status) {
+            status.classList.remove('running');
+            status.classList.add('done');
+            status.textContent = 'done';
+        }
+    });
+    pendingToolCalls.clear();
 
     enableInput();
 }
