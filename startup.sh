@@ -23,10 +23,19 @@ if lsof -ti :8931 >/dev/null 2>&1; then
     sleep 1
 fi
 
-# Check that npx is available on the host
+# Ensure Node.js / npm / npx are available on the host
 if ! command -v npx &>/dev/null; then
-    echo "Error: npx not found. Install Node.js on the host to run Playwright MCP."
-    exit 1
+    echo "npx not found – installing Node.js..."
+    if [ "$(id -u)" -eq 0 ]; then
+        apt-get update && apt-get install -y nodejs npm
+    else
+        sudo apt-get update && sudo apt-get install -y nodejs npm
+    fi
+    # Verify installation succeeded
+    if ! command -v npx &>/dev/null; then
+        echo "Error: Failed to install Node.js/npm. Please install manually and retry."
+        exit 1
+    fi
 fi
 
 echo "Starting Playwright MCP server on host (port 8931) in extension mode..."
