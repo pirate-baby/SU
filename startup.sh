@@ -102,4 +102,9 @@ echo "Access the chat at: http://localhost"
 echo "Playwright MCP server running on: http://localhost:8931/sse"
 echo ""
 echo "To view logs: docker compose logs -f"
-echo "To stop: docker compose down  (Playwright MCP will stop automatically)"
+echo "To stop: Ctrl-C  (stops Playwright MCP; then 'docker compose down' for containers)"
+echo ""
+
+# Keep the script alive so the Playwright MCP background process isn't killed.
+# The EXIT trap will clean it up when this script is interrupted (Ctrl-C / SIGTERM).
+wait "$PLAYWRIGHT_PID"
