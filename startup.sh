@@ -45,7 +45,18 @@ echo "Starting Playwright MCP server on host (port 8931) in extension mode..."
 # --host 0.0.0.0   : accept connections from Docker containers
 # --allowed-hosts *: disable the Host-header check so that requests arriving
 #   with "Host: host.docker.internal:8931" (from inside Docker) are not rejected.
-export PLAYWRIGHT_MCP_EXTENSION_TOKEN="oMa0YkhIfcFTnJLjvSo0Md8fHeck1sOo0ifO9ycE08o"
+# Load PLAYWRIGHT_MCP_EXTENSION_TOKEN from .env if not already set
+if [ -z "$PLAYWRIGHT_MCP_EXTENSION_TOKEN" ]; then
+    if [ -f .env ]; then
+        PLAYWRIGHT_MCP_EXTENSION_TOKEN=$(grep -E '^PLAYWRIGHT_MCP_EXTENSION_TOKEN=' .env | cut -d'=' -f2- | tr -d '"' | tr -d "'")
+    fi
+    if [ -z "$PLAYWRIGHT_MCP_EXTENSION_TOKEN" ]; then
+        echo "Error: PLAYWRIGHT_MCP_EXTENSION_TOKEN is not set."
+        echo "Set it in .env or export it before running this script."
+        exit 1
+    fi
+fi
+export PLAYWRIGHT_MCP_EXTENSION_TOKEN
 npx -y @playwright/mcp@latest \
     --extension \
     --host 0.0.0.0 \
