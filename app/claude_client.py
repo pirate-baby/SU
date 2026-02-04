@@ -56,6 +56,18 @@ class ClaudeChat:
             allowed_tools=[
                 "mcp__website__browse_website",
             ],
+            disallowed_tools=[
+                "Task",
+                "Bash",
+                "Glob",
+                "Grep",
+                "Read",
+                "Edit",
+                "Write",
+                "WebFetch",
+                "WebSearch",
+                "NotebookEdit",
+            ],
             permission_mode="bypassPermissions",
             max_turns=20,
             system_prompt=_build_system_prompt(),
