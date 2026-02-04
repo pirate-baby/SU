@@ -93,10 +93,14 @@ HEADLESS_SYSTEM_PROMPT = (
     "You CANNOT request user input, clarification, or confirmation at any point. "
     "You must make all decisions yourself and keep using browser tools until the "
     "task is complete.\n\n"
+    "Your tools all have the prefix mcp__playwright__ (e.g. "
+    "mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot). "
+    "You MUST use these exact tool names.\n\n"
     "Rules:\n"
-    "1. Start by navigating to the target URL.\n"
-    "2. Use browser_snapshot (not screenshots) to read page state.\n"
-    "3. Interact with the page using click, type, fill_form, etc.\n"
+    "1. Start by navigating to the target URL with mcp__playwright__browser_navigate.\n"
+    "2. Use mcp__playwright__browser_snapshot (not screenshots) to read page state.\n"
+    "3. Interact with the page using mcp__playwright__browser_click, "
+    "mcp__playwright__browser_type, mcp__playwright__browser_fill_form, etc.\n"
     "4. Keep working until you have gathered all the data needed.\n"
     "5. If something fails, try alternative approaches before giving up.\n"
     "6. When done, return your findings as structured JSON matching the "
@@ -224,6 +228,15 @@ async def browse_website(args: dict[str, Any]) -> dict[str, Any]:
 
                     if isinstance(message, SystemMessage):
                         if message.subtype == "init":
+                            mcp_servers = message.data.get("mcp_servers", [])
+                            for srv in mcp_servers:
+                                status = srv.get("status", "unknown")
+                                name = srv.get("name", "unknown")
+                                if status != "connected":
+                                    logger.error("MCP server %s failed: %s", name, srv)
+                                    _emit({"type": "subagent_status", "message": f"MCP server {name} failed to connect"})
+                                else:
+                                    logger.info("MCP server %s connected", name)
                             _emit({"type": "subagent_status", "message": "Subagent connected"})
 
                     elif isinstance(message, AssistantMessage):

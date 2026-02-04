@@ -58,6 +58,7 @@ echo "Starting Playwright MCP server on host (port 8931)..."
 npx -y @playwright/mcp@latest \
     --browser chrome \
     --user-data-dir "$CHROME_USER_DATA_DIR" \
+    --host 0.0.0.0 \
     --port 8931 &
 PLAYWRIGHT_PID=$!
 
