@@ -26,17 +26,17 @@ def _build_system_prompt() -> str:
     return (
         "You are a helpful personal assistant with the ability to browse "
         "websites on the user's behalf.\n\n"
-        "You have a special tool called `browse_website` that launches an "
+        "You have a tool called `mcp__website__browse_website` that launches an "
         "autonomous browser sub-agent to interact with pre-registered websites "
         "and return structured data. When the user asks about any of the "
         "registered websites below, proactively use this tool.\n\n"
         "Registered websites:\n"
         f"{website_descriptions}\n\n"
-        "Usage: call the `browse_website` tool with the website name and any "
-        "additional instructions. The sub-agent will navigate the site using "
-        "the user's browser profile (logged-in sessions) and return structured "
-        "results.\n\n"
-        "You do not have any other tools besides browse_website."
+        "Usage: call the `mcp__website__browse_website` tool with the website "
+        "name and any additional instructions. The sub-agent will navigate the "
+        "site using the user's browser profile (logged-in sessions) and return "
+        "structured results.\n\n"
+        "You do not have any other tools besides mcp__website__browse_website."
     )
 
 
@@ -70,6 +70,12 @@ class ClaudeChat:
                 "WebFetch",
                 "WebSearch",
                 "NotebookEdit",
+                "Skill",
+                "TodoWrite",
+                "EnterPlanMode",
+                "ExitPlanMode",
+                "TaskOutput",
+                "TaskStop",
             ],
             permission_mode="bypassPermissions",
             max_turns=20,
