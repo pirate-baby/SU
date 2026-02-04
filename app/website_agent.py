@@ -2,6 +2,7 @@
 Website subagent: SDK MCP tool that spawns a Playwright-equipped Claude subagent
 to interact with pre-registered websites and return structured data.
 """
+import asyncio
 import json
 import logging
 import platform
@@ -35,6 +36,9 @@ from claude_agent_sdk import (
 from app.website_models import WEBSITE_REGISTRY
 
 logger = logging.getLogger(__name__)
+
+# Maximum seconds to wait for the subagent to finish browsing.
+SUBAGENT_TIMEOUT_SECONDS = 120
 
 
 def _get_chrome_user_data_dir() -> str:
@@ -190,27 +194,29 @@ async def browse_website(args: dict[str, Any]) -> dict[str, Any]:
         structured_result = None
         text_result = ""
 
-        async with ClaudeSDKClient(options=subagent_options) as client:
-            await client.query(prompt)
+        async def _run_subagent():
+            nonlocal structured_result, text_result
+            async with ClaudeSDKClient(options=subagent_options) as client:
+                await client.query(prompt)
 
-            async for message in client.receive_response():
-                if isinstance(message, ResultMessage):
-                    if message.structured_output:
-                        structured_result = message.structured_output
-                    elif message.result:
-                        text_result = message.result
+                async for message in client.receive_response():
+                    logger.info(
+                        "Subagent message: type=%s", type(message).__name__
+                    )
+                    if isinstance(message, ResultMessage):
+                        if message.structured_output:
+                            structured_result = message.structured_output
+                        elif message.result:
+                            text_result = message.result
 
-                    if message.is_error:
-                        return {
-                            "content": [{
-                                "type": "text",
-                                "text": json.dumps({
-                                    "error": "Subagent encountered an error",
-                                    "details": message.result or "Unknown error",
-                                }),
-                            }],
-                            "is_error": True,
-                        }
+                        if message.is_error:
+                            raise RuntimeError(
+                                message.result or "Subagent error"
+                            )
+
+        await asyncio.wait_for(
+            _run_subagent(), timeout=SUBAGENT_TIMEOUT_SECONDS
+        )
 
         if structured_result:
             validated = config.response_model.model_validate(structured_result)
@@ -241,6 +247,23 @@ async def browse_website(args: dict[str, Any]) -> dict[str, Any]:
                 "text": json.dumps({
                     "error": "Subagent did not return structured data",
                     "raw_response": text_result[:2000] if text_result else "No response",
+                }),
+            }],
+            "is_error": True,
+        }
+
+    except asyncio.TimeoutError:
+        logger.error(
+            "Subagent timed out after %d seconds for website=%s",
+            SUBAGENT_TIMEOUT_SECONDS,
+            website_name,
+        )
+        return {
+            "content": [{
+                "type": "text",
+                "text": json.dumps({
+                    "error": f"Subagent timed out after {SUBAGENT_TIMEOUT_SECONDS}s",
+                    "raw_response": text_result[:2000] if text_result else "No response yet",
                 }),
             }],
             "is_error": True,

@@ -121,7 +121,7 @@ class ClaudeChat:
         try:
             await self._client.query(message)
 
-            async for msg in self._client.receive_messages():
+            async for msg in self._client.receive_response():
                 logger.info("SDK message: type=%s", type(msg).__name__)
 
                 if isinstance(msg, SystemMessage):
@@ -197,7 +197,6 @@ class ClaudeChat:
                             "type": "error",
                             "content": msg.result or "Unknown error",
                         }
-                    break
 
         except Exception as e:
             logger.exception("Error in send_message")
