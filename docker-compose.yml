@@ -13,6 +13,9 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - PLAYWRIGHT_MCP_URL=http://host.docker.internal:8931/sse
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]

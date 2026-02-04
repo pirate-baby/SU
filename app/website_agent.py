@@ -5,8 +5,6 @@ to interact with pre-registered websites and return structured data.
 import asyncio
 import json
 import logging
-import platform
-from pathlib import Path
 from typing import Any
 
 import inspect
@@ -50,30 +48,16 @@ SUBAGENT_TIMEOUT_SECONDS = 120
 subagent_event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
 
-def _get_chrome_user_data_dir() -> str:
-    """Return the default Chrome user data directory for the current platform."""
-    system = platform.system()
-    if system == "Darwin":
-        return str(Path.home() / "Library" / "Application Support" / "Google" / "Chrome")
-    elif system == "Linux":
-        return str(Path.home() / ".config" / "google-chrome")
-    elif system == "Windows":
-        return str(Path.home() / "AppData" / "Local" / "Google" / "Chrome" / "User Data")
-    else:
-        raise RuntimeError(f"Unsupported platform: {system}")
-
-
 def _build_playwright_mcp_config() -> dict:
-    """Build the McpStdioServerConfig for Playwright MCP with Chrome user profile."""
+    """Connect to Playwright MCP running as an SSE server on the host.
+
+    The Playwright MCP server must be started on the host machine (not inside
+    the container) so it has access to the real Chrome installation and user
+    profile.  Inside Docker, ``host.docker.internal`` resolves to the host.
+    """
     return {
-        "type": "stdio",
-        "command": "npx",
-        "args": [
-            "-y",
-            "@playwright/mcp@latest",
-            "--browser", "chrome",
-            "--user-data-dir", _get_chrome_user_data_dir(),
-        ],
+        "type": "sse",
+        "url": "http://host.docker.internal:8931/sse",
     }
 
 
