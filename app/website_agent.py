@@ -207,6 +207,7 @@ async def browse_website(args: dict[str, Any]) -> dict[str, Any]:
             nonlocal structured_result, text_result
 
             def _emit(event: dict[str, Any]):
+                logger.info("Subagent emit: %s", event.get("type"))
                 subagent_event_queue.put_nowait(event)
 
             _emit({"type": "subagent_status", "message": f"Launching browser for {config.url}"})

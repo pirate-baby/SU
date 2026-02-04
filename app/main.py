@@ -98,11 +98,16 @@ async def send_message_history(websocket: WebSocket, session_id: str):
         })
 
 
+logger = logging.getLogger(__name__)
+
+
 async def _drain_subagent_events(websocket: WebSocket, stop: asyncio.Event):
     """Forward subagent progress events to the websocket until stop is set."""
+    logger.info("Drain task started")
     while not stop.is_set():
         try:
             event = await asyncio.wait_for(subagent_event_queue.get(), timeout=0.25)
+            logger.info("Draining subagent event: %s", event.get("type"))
             await websocket.send_json({
                 "type": "subagent_event",
                 **event,
@@ -110,7 +115,9 @@ async def _drain_subagent_events(websocket: WebSocket, stop: asyncio.Event):
         except asyncio.TimeoutError:
             continue
         except Exception:
+            logger.exception("Drain task error")
             break
+    logger.info("Drain task stopped")
 
 
 async def stream_claude_response(websocket: WebSocket, session_id: str, user_message: str, claude: ClaudeChat):
