@@ -33,7 +33,9 @@ COPY app/ ./app/
 RUN useradd -m -u 501 appuser && \
     chown -R appuser:appuser /app && \
     mkdir -p /home/appuser/basic-memory && \
-    chown appuser:appuser /home/appuser/basic-memory
+    chown appuser:appuser /home/appuser/basic-memory && \
+    mkdir -p /data && \
+    chown appuser:appuser /data
 
 # Switch to non-root user
 USER appuser

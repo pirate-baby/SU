@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 DATABASE_PATH = Path(
-    os.environ.get("DATABASE_PATH", str(Path(__file__).resolve().parent.parent / "sessions.db"))
+    os.environ.get("DATABASE_PATH", "/data/sessions.db")
 )
 
 

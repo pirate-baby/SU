@@ -10,10 +10,12 @@ services:
       - ${HOME}/.claude:/home/appuser/.claude:ro
       - ${CLAUDE_WORKDIR:-./claude-workspace}:/workspace
       - basic-memory-data:/home/appuser/basic-memory
+      - session-data:/data
     environment:
       - PYTHONUNBUFFERED=1
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
       - PLAYWRIGHT_MCP_URL=http://host.docker.internal:8931/sse
+      - DATABASE_PATH=/data/sessions.db
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -43,6 +45,7 @@ services:
 
 volumes:
   basic-memory-data:
+  session-data:
 
 networks:
   claude-network:
