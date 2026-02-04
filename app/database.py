@@ -1,11 +1,14 @@
 """
 SQLite database initialization and connection management.
 """
+import os
 import aiosqlite
 from pathlib import Path
 from typing import Optional
 
-DATABASE_PATH = Path("/workspace/sessions.db")
+DATABASE_PATH = Path(
+    os.environ.get("DATABASE_PATH", str(Path(__file__).resolve().parent.parent / "sessions.db"))
+)
 
 
 def get_db():
