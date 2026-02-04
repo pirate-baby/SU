@@ -2,10 +2,8 @@
 FastAPI application with Claude chat functionality.
 """
 import json
-from pathlib import Path
-from typing import Optional
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from contextlib import asynccontextmanager
@@ -92,15 +90,10 @@ async def send_message_history(websocket: WebSocket, session_id: str):
 
 
 async def stream_claude_response(websocket: WebSocket, session_id: str, user_message: str, claude: ClaudeChat):
-    session = await get_session(session_id)
-    conversation_history = claude.build_conversation_history(
-        session.messages if session else []
-    )
-
     await websocket.send_json({"type": "assistant_start"})
 
     full_response = ""
-    async for event in claude.send_message(user_message, conversation_history):
+    async for event in claude.send_message(user_message):
         event_type = event["type"]
 
         if event_type == "text":
@@ -191,14 +184,15 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
         return
 
     try:
-        while True:
-            data = await websocket.receive_text()
-            message_data = json.loads(data)
+        async with claude:
+            while True:
+                data = await websocket.receive_text()
+                message_data = json.loads(data)
 
-            if message_data.get("type") == "user_message":
-                user_message = message_data.get("content", "").strip()
-                if user_message:
-                    await handle_user_message(websocket, session_id, user_message, claude)
+                if message_data.get("type") == "user_message":
+                    user_message = message_data.get("content", "").strip()
+                    if user_message:
+                        await handle_user_message(websocket, session_id, user_message, claude)
 
     except WebSocketDisconnect:
         print(f"WebSocket disconnected for session {session_id}")
