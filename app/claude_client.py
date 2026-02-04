@@ -1,6 +1,7 @@
 """
 Claude SDK client wrapper for chat functionality.
 """
+import logging
 import os
 from typing import Any, AsyncGenerator, Optional
 from claude_agent_sdk import (
@@ -8,6 +9,8 @@ from claude_agent_sdk import (
     ClaudeAgentOptions,
     TextBlock,
     AssistantMessage,
+    UserMessage,
+    SystemMessage,
     ToolUseBlock,
     ToolResultBlock,
     ResultMessage,
@@ -15,6 +18,8 @@ from claude_agent_sdk import (
 from app.config import settings
 from app.website_agent import website_mcp_server
 from app.website_models import WEBSITE_REGISTRY
+
+logger = logging.getLogger(__name__)
 
 
 def _build_system_prompt() -> str:
@@ -116,9 +121,53 @@ class ClaudeChat:
         try:
             await self._client.query(message)
 
-            async for msg in self._client.receive_response():
-                if isinstance(msg, AssistantMessage):
+            async for msg in self._client.receive_messages():
+                logger.info("SDK message: type=%s", type(msg).__name__)
+
+                if isinstance(msg, SystemMessage):
+                    logger.info(
+                        "SystemMessage subtype=%s data=%s",
+                        msg.subtype,
+                        msg.data,
+                    )
+                    if msg.subtype == "init":
+                        mcp_servers = msg.data.get("mcp_servers", [])
+                        for srv in mcp_servers:
+                            if srv.get("status") != "connected":
+                                logger.error(
+                                    "MCP server failed to connect: %s", srv
+                                )
+
+                elif isinstance(msg, UserMessage):
+                    # Tool results come back as UserMessage in the Claude API.
+                    content = msg.content
+                    if isinstance(content, list):
+                        for block in content:
+                            if isinstance(block, ToolResultBlock):
+                                logger.info(
+                                    "  ToolResult via UserMessage tool_use_id=%s is_error=%s",
+                                    block.tool_use_id,
+                                    block.is_error,
+                                )
+                                yield {
+                                    "type": "tool_result",
+                                    "tool_use_id": block.tool_use_id,
+                                    "content": block.content,
+                                    "is_error": block.is_error or False,
+                                }
+                            else:
+                                logger.info(
+                                    "  UserMessage block type=%s",
+                                    type(block).__name__,
+                                )
+                    else:
+                        logger.info("  UserMessage content=%s", str(content)[:200])
+
+                elif isinstance(msg, AssistantMessage):
                     for block in msg.content:
+                        logger.info(
+                            "  block type=%s", type(block).__name__
+                        )
                         if isinstance(block, TextBlock):
                             yield {"type": "text", "content": block.text}
                         elif isinstance(block, ToolUseBlock):
@@ -135,12 +184,21 @@ class ClaudeChat:
                                 "content": block.content,
                                 "is_error": block.is_error or False,
                             }
+
                 elif isinstance(msg, ResultMessage):
+                    logger.info(
+                        "ResultMessage subtype=%s is_error=%s result=%s",
+                        getattr(msg, "subtype", None),
+                        msg.is_error,
+                        (msg.result or "")[:500],
+                    )
                     if msg.is_error:
                         yield {
                             "type": "error",
                             "content": msg.result or "Unknown error",
                         }
+                    break
 
         except Exception as e:
+            logger.exception("Error in send_message")
             yield {"type": "error", "content": f"Error communicating with Claude: {str(e)}"}
