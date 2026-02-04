@@ -60,12 +60,17 @@ echo "Starting Playwright MCP server on host (port 8931)..."
 #   with "Host: host.docker.internal:8931" (from inside Docker) are not rejected.
 #   Without this, the server only accepts requests whose Host header matches
 #   "localhost" exactly, which fails for Docker's host.docker.internal alias.
+# --config         : passes launch args to Chrome, specifically disabling
+#   DevToolsDebuggingRestrictions (Chrome 136+) which otherwise causes
+#   launchPersistentContext to open about:blank instead of the actual page.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 npx -y @playwright/mcp@latest \
     --browser chrome \
     --user-data-dir "$CHROME_USER_DATA_DIR" \
     --host 0.0.0.0 \
     --allowed-hosts '*' \
-    --port 8931 &
+    --port 8931 \
+    --config "$SCRIPT_DIR/playwright-mcp-config.json" &
 PLAYWRIGHT_PID=$!
 
 # Wait briefly and verify the process is still running
