@@ -1,9 +1,0 @@
-{
-  "browser": {
-    "launchOptions": {
-      "args": [
-        "--disable-features=DevToolsDebuggingRestrictions"
-      ]
-    }
-  }
-}

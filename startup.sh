@@ -4,31 +4,6 @@ set -e
 
 echo "Starting Claude Chat Service..."
 
-# Detect OS
-OS=$(uname -s)
-CHROME_USER_DATA_DIR=""
-
-case "$OS" in
-    Darwin)
-        echo "Detected macOS"
-        CHROME_USER_DATA_DIR="$HOME/Library/Application Support/Google/Chrome"
-        ;;
-    Linux)
-        echo "Detected Linux"
-        CHROME_USER_DATA_DIR="$HOME/.config/google-chrome"
-        if [ -f /etc/os-release ]; then
-            . /etc/os-release
-            if [[ "$ID" == "ubuntu" ]] || [[ "$ID_LIKE" == *"ubuntu"* ]] || [[ "$ID_LIKE" == *"debian"* ]]; then
-                echo "Running on Ubuntu/Debian"
-            fi
-        fi
-        ;;
-    *)
-        echo "Unsupported OS: $OS"
-        exit 1
-        ;;
-esac
-
 # Check for .claude directory (needed for authentication)
 if [ ! -d "$HOME/.claude" ]; then
     echo "Warning: $HOME/.claude directory not found"
@@ -54,31 +29,26 @@ if ! command -v npx &>/dev/null; then
     exit 1
 fi
 
-echo "Starting Playwright MCP server on host (port 8931)..."
-# --host 0.0.0.0  : accept connections from Docker containers
+echo "Starting Playwright MCP server on host (port 8931) in extension mode..."
+# --extension      : connect to the existing browser via the Playwright MCP
+#   Bridge extension instead of launching a new instance. This avoids profile
+#   lock conflicts and about:blank issues with launchPersistentContext.
+# --host 0.0.0.0   : accept connections from Docker containers
 # --allowed-hosts *: disable the Host-header check so that requests arriving
 #   with "Host: host.docker.internal:8931" (from inside Docker) are not rejected.
-#   Without this, the server only accepts requests whose Host header matches
-#   "localhost" exactly, which fails for Docker's host.docker.internal alias.
-# --config         : passes launch args to Chrome, specifically disabling
-#   DevToolsDebuggingRestrictions (Chrome 136+) which otherwise causes
-#   launchPersistentContext to open about:blank instead of the actual page.
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+export PLAYWRIGHT_MCP_EXTENSION_TOKEN="oMa0YkhIfcFTnJLjvSo0Md8fHeck1sOo0ifO9ycE08o"
 npx -y @playwright/mcp@latest \
-    --browser chrome \
-    --user-data-dir "$CHROME_USER_DATA_DIR" \
+    --extension \
     --host 0.0.0.0 \
     --allowed-hosts '*' \
-    --port 8931 \
-    --config "$SCRIPT_DIR/playwright-mcp-config.json" &
+    --port 8931 &
 PLAYWRIGHT_PID=$!
 
 # Wait briefly and verify the process is still running
 sleep 2
 if ! kill -0 "$PLAYWRIGHT_PID" 2>/dev/null; then
     echo "Error: Playwright MCP server failed to start."
-    echo "Check that Chrome is installed and the user data directory exists:"
-    echo "  $CHROME_USER_DATA_DIR"
+    echo "Check that Chrome is running and the Playwright MCP Bridge extension is installed."
     exit 1
 fi
 echo "Playwright MCP server started (PID $PLAYWRIGHT_PID)"
