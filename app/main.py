@@ -1,6 +1,7 @@
 """
 FastAPI application with Claude chat functionality.
 """
+import asyncio
 import json
 import logging
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
@@ -20,6 +21,7 @@ from app.session_manager import (
     end_session,
 )
 from app.claude_client import ClaudeChat
+from app.memory_manager import on_user_message, on_session_end
 from app.models import SessionCreateResponse
 
 
@@ -78,6 +80,7 @@ async def end_chat_session(session_id: str):
         raise HTTPException(status_code=404, detail="Session not found")
 
     await end_session(session_id)
+    asyncio.ensure_future(on_session_end(session_id))
     return {"status": "ended"}
 
 
@@ -89,6 +92,7 @@ async def send_message_history(websocket: WebSocket, session_id: str):
             "messages": [
                 {"role": msg.role, "content": msg.content}
                 for msg in session.messages
+                if msg.role in ("user", "assistant")
             ]
         })
 
@@ -130,14 +134,50 @@ async def stream_claude_response(websocket: WebSocket, session_id: str, user_mes
     await websocket.send_json({"type": "assistant_end"})
 
 
+async def _inject_pending_memories(session_id: str, claude: ClaudeChat) -> None:
+    """Feed any pending memory thoughts into the SDK client's internal history.
+
+    Pending memories (role='memory') are sent as a silent context-setting
+    exchange so the main agent perceives them as prior knowledge.  The
+    memory rows are then marked as consumed by updating their role to
+    'memory_consumed' so they are not re-injected on subsequent messages.
+    """
+    session = await get_session(session_id)
+    if not session or not session.messages:
+        return
+
+    pending = [m for m in session.messages if m.role == "memory"]
+    if not pending:
+        return
+
+    # Combine all pending thoughts into a single context block
+    thoughts = "\n\n".join(m.content for m in pending)
+    context_msg = (
+        f"<context>\n{thoughts}\n</context>"
+    )
+
+    # Send as a user message and silently consume the response so the
+    # thoughts enter the SDK's internal conversation history.
+    async for _ in claude.send_message(context_msg):
+        pass
+
+    # Mark consumed so we don't re-inject next turn
+    from app.session_manager import mark_memories_consumed
+    for m in pending:
+        if m.id is not None:
+            await mark_memories_consumed(m.id)
+
+
 async def handle_user_message(websocket: WebSocket, session_id: str, user_message: str, claude: ClaudeChat):
     await save_message(session_id, "user", user_message)
+    asyncio.ensure_future(on_user_message(session_id))
     await websocket.send_json({
         "type": "user_message",
         "content": user_message
     })
 
     try:
+        await _inject_pending_memories(session_id, claude)
         await stream_claude_response(websocket, session_id, user_message, claude)
     except Exception as e:
         await websocket.send_json({

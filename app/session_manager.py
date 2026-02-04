@@ -114,6 +114,16 @@ async def cleanup_old_sessions(days: int = 7):
         await db.commit()
 
 
+async def mark_memories_consumed(message_id: int) -> None:
+    """Mark a memory message as consumed so it is not re-injected."""
+    async with get_db() as db:
+        await db.execute(
+            "UPDATE messages SET role = 'memory_consumed' WHERE id = ?",
+            (message_id,)
+        )
+        await db.commit()
+
+
 async def session_exists(session_id: str) -> bool:
     """Check if a session exists and is active."""
     async with get_db() as db:

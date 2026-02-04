@@ -9,6 +9,7 @@ services:
     volumes:
       - ${HOME}/.claude:/home/appuser/.claude:ro
       - ${CLAUDE_WORKDIR:-./claude-workspace}:/workspace
+      - basic-memory-data:/home/appuser/basic-memory
     environment:
       - PYTHONUNBUFFERED=1
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
@@ -36,6 +37,9 @@ services:
     restart: unless-stopped
     networks:
       - claude-network
+
+volumes:
+  basic-memory-data:
 
 networks:
   claude-network:
