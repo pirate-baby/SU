@@ -12,13 +12,16 @@ import inspect
 
 from mcp.server import Server as _McpServer
 
-# Monkey-patch: mcp 0.9.x removed the `version` kwarg from Server.__init__,
-# but claude-agent-sdk's create_sdk_mcp_server still passes it.
+# Monkey-patch: mcp 0.9.x+ removed the `version` kwarg from Server.__init__,
+# but claude-agent-sdk's create_sdk_mcp_server still passes it.  We must
+# preserve it as an instance attribute because the SDK's control-protocol
+# handler reads `server.version` during MCP initialization.
 _orig_server_init = _McpServer.__init__
 if "version" not in inspect.signature(_orig_server_init).parameters:
     def _patched_server_init(self, name, **kwargs):
-        kwargs.pop("version", None)
-        return _orig_server_init(self, name, **kwargs)
+        version = kwargs.pop("version", "1.0.0")
+        _orig_server_init(self, name, **kwargs)
+        self.version = version
     _McpServer.__init__ = _patched_server_init
 
 from claude_agent_sdk import (
