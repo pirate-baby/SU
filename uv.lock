@@ -44,18 +44,18 @@ wheels = [
 
 [[package]]
 name = "claude-agent-sdk"
-version = "0.1.27"
+version = "0.1.28"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
     { name = "mcp" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ce/ef/0e51909e5a6e39d7c9e4073fdd3e00ff70677f99f8d1b87adef329c34acc/claude_agent_sdk-0.1.27.tar.gz", hash = "sha256:d2f4fc4c5e5c088efbaf66c34efcfd2aa7efafa3fed82f5cb1a95c451df96c38", size = 57216, upload_time = "2026-01-31T23:48:29.494Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6e/c4/7ddb9e48065e930f09d911def28c4de0177a512734bdec004b3b4f6fb8b0/claude_agent_sdk-0.1.28.tar.gz", hash = "sha256:374a25b1a7744ba1ebd72d758011a6b25d5aaf687cd8ed611ff31f0c335e460b", size = 57660, upload_time = "2026-02-03T18:16:05.71Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/66/fe/52b1e8394428ddafd952f41799bb4c8b0e60627b808ee2d797644da02624/claude_agent_sdk-0.1.27-py3-none-macosx_11_0_arm64.whl", hash = "sha256:eddfe7fa40fdbd0a49fafd5698791bc911bc1e66e6ace2f77c50d5b64e138e93", size = 53901311, upload_time = "2026-01-31T23:48:16.664Z" },
-    { url = "https://files.pythonhosted.org/packages/9f/eb/69dedbb195b69bd4b2ebf127407778e89c56e547e02bbcb74c130e1584c4/claude_agent_sdk-0.1.27-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:babf796d478a2b7ff75afab61d47bede4afecd6c793b7d540ee3aab42f00d5fb", size = 68107707, upload_time = "2026-01-31T23:48:19.724Z" },
-    { url = "https://files.pythonhosted.org/packages/84/06/886931dcbce8cd586aa38afa3ebdefe7d9eaa4ad389fa795560317c1f891/claude_agent_sdk-0.1.27-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:de0e22f3408ce7bdf909218e28be0e317b8d7d64b855cefc2cb3dd022f5f887b", size = 69810719, upload_time = "2026-01-31T23:48:22.914Z" },
-    { url = "https://files.pythonhosted.org/packages/d8/ea/c987078f5059f05756886609f3196c8aeebe10f4e79c1f82f58b71eaeb9f/claude_agent_sdk-0.1.27-py3-none-win_amd64.whl", hash = "sha256:23fbb90727cd4dc776ad894a1b2dc040fb9fc2f0277a32b94336665e7c950692", size = 71994821, upload_time = "2026-01-31T23:48:26.333Z" },
+    { url = "https://files.pythonhosted.org/packages/dd/03/5bc4f9e8d5f2e0ed4c8cba0255021f737ec05230cffa7511b5e979e9ced9/claude_agent_sdk-0.1.28-py3-none-macosx_11_0_arm64.whl", hash = "sha256:66630bc1906ca383dfaa5b5e4bc93043d52616dd4b15b96f120631db00f5cbf8", size = 54188673, upload_time = "2026-02-03T18:15:50.652Z" },
+    { url = "https://files.pythonhosted.org/packages/a7/3c/d2d706e2f9b900194fce1bbfa3cf41fc489c3d3e81f7b3b07140f7a5c4f4/claude_agent_sdk-0.1.28-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:6a24a0f699701f42fd4ef3cbe25142397b642fbb9b881a567b051233972e122c", size = 68379018, upload_time = "2026-02-03T18:15:54.917Z" },
+    { url = "https://files.pythonhosted.org/packages/51/85/881eb1ae25d82f5895588b432820f6cf64cdc81783646f1976fc2d6a5109/claude_agent_sdk-0.1.28-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:3b38397be130bc04fe0d70864423fda39444dbc31634fa177fee1b892f1e208f", size = 70095465, upload_time = "2026-02-03T18:15:58.763Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/4d/8dce7bedf4b343f6f5a2342085b7ce509dbecb32e6aeaffe1806736f061b/claude_agent_sdk-0.1.28-py3-none-win_amd64.whl", hash = "sha256:53f5d8e1b1faf09f2b0e2458921a5c6bf6dc11cce55a1be7d52cf5294c4371c0", size = 72281170, upload_time = "2026-02-03T18:16:02.71Z" },
 ]
 
 [[package]]
@@ -68,6 +68,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "jinja2" },
     { name = "pydantic" },
+    { name = "pydantic-settings" },
     { name = "python-multipart" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "websockets" },
@@ -83,11 +84,12 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiosqlite", specifier = ">=0.19.0" },
-    { name = "claude-agent-sdk", specifier = ">=0.1.27" },
+    { name = "claude-agent-sdk", specifier = ">=0.1.28" },
     { name = "fastapi", specifier = "==0.109.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.25.0" },
     { name = "jinja2", specifier = ">=3.1.0" },
     { name = "pydantic", specifier = "==2.5.3" },
+    { name = "pydantic-settings", specifier = ">=2.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1.0" },
     { name = "python-multipart", specifier = "==0.0.6" },
@@ -444,6 +446,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/d9/3e/28bd56c6aeadaae2eca12e39274b880505dd7fc9fa7b732d11167275c084/pydantic_core-2.14.6-cp312-none-win32.whl", hash = "sha256:f27207e8ca3e5e021e2402ba942e5b4c629718e665c81b8b306f3c8b1ddbb786", size = 1743090, upload_time = "2023-12-21T19:53:36.711Z" },
     { url = "https://files.pythonhosted.org/packages/84/13/afa2b5c336d30a43592f9bc8d5769ccd15b32b4ef243bd792496fe336925/pydantic_core-2.14.6-cp312-none-win_amd64.whl", hash = "sha256:b3e5fe4538001bb82e2295b8d2a39356a84694c97cb73a566dc36328b9f83b40", size = 1866497, upload_time = "2023-12-21T19:53:39.401Z" },
     { url = "https://files.pythonhosted.org/packages/04/33/68e91365ac5ef23fc70fbc4e24ab2f212a6ca39cd23b81589af9807946df/pydantic_core-2.14.6-cp312-none-win_arm64.whl", hash = "sha256:64634ccf9d671c6be242a664a33c4acf12882670b09b3f163cd00a24cffbd74e", size = 1844384, upload_time = "2023-12-21T19:53:41.316Z" },
+]
+
+[[package]]
+name = "pydantic-settings"
+version = "2.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/00/a4/89191c3cce6e6f79b734bfe81d3a8f176d21b57b034689cfbdc57d61c412/pydantic_settings-2.2.1.tar.gz", hash = "sha256:00b9f6a5e95553590434c0fa01ead0b216c3e10bc54ae02e37f359948643c5ed", size = 35495, upload_time = "2024-02-19T19:50:21.398Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/99/ee/24ec87e3a91426497c5a2b9880662d19cfd640342d477334ebc60fc2c276/pydantic_settings-2.2.1-py3-none-any.whl", hash = "sha256:0235391d26db4d2190cb9b31051c4b46882d28a51533f97440867f012d4da091", size = 13150, upload_time = "2024-02-19T19:50:19.747Z" },
 ]
 
 [[package]]
