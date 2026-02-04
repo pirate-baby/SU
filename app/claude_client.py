@@ -15,6 +15,30 @@ from claude_agent_sdk import (
 )
 from app.config import settings
 from app.website_agent import website_mcp_server
+from app.website_models import WEBSITE_REGISTRY
+
+
+def _build_system_prompt() -> str:
+    """Build the system prompt with dynamic website registry info."""
+    website_descriptions = "\n".join(
+        f"  - \"{name}\": {config.instructions}"
+        for name, config in WEBSITE_REGISTRY.items()
+    )
+    return (
+        "You are a helpful personal assistant with the ability to browse "
+        "websites on the user's behalf.\n\n"
+        "You have a special tool called `browse_website` that launches an "
+        "autonomous browser sub-agent to interact with pre-registered websites "
+        "and return structured data. When the user asks about any of the "
+        "registered websites below, proactively use this tool.\n\n"
+        "Registered websites:\n"
+        f"{website_descriptions}\n\n"
+        "Usage: call the `browse_website` tool with the website name and any "
+        "additional instructions. The sub-agent will navigate the site using "
+        "the user's browser profile (logged-in sessions) and return structured "
+        "results.\n\n"
+        "You do not have any other tools besides browse_website."
+    )
 
 
 class ClaudeChat:
@@ -30,11 +54,11 @@ class ClaudeChat:
                 "website": website_mcp_server,
             },
             allowed_tools=[
-                "Read", "Glob", "Grep", "WebSearch", "WebFetch",
                 "mcp__website__browse_website",
             ],
-            permission_mode="default",
+            permission_mode="bypassPermissions",
             max_turns=20,
+            system_prompt=_build_system_prompt(),
         )
 
     async def send_message(

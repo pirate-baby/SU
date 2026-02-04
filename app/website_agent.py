@@ -174,7 +174,7 @@ async def browse_website(args: dict[str, Any]) -> dict[str, Any]:
             "playwright": _build_playwright_mcp_config(),
         },
         allowed_tools=PLAYWRIGHT_ALLOWED_TOOLS,
-        permission_mode="acceptEdits",
+        permission_mode="bypassPermissions",
         max_turns=30,
         output_format={
             "type": "json_schema",
