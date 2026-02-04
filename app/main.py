@@ -2,6 +2,7 @@
 FastAPI application with Claude chat functionality.
 """
 import json
+import logging
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -20,6 +21,9 @@ from app.session_manager import (
 )
 from app.claude_client import ClaudeChat
 from app.models import SessionCreateResponse
+
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
 
 @asynccontextmanager
