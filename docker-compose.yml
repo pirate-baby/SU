@@ -14,7 +14,6 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
-      - PLAYWRIGHT_MCP_URL=http://host.docker.internal:8931/sse
       - DATABASE_PATH=/data/sessions.db
     extra_hosts:
       - "host.docker.internal:host-gateway"

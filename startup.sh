@@ -16,7 +16,6 @@ case "$OS" in
     Linux)
         echo "Detected Linux"
         CHROME_USER_DATA_DIR="$HOME/.config/google-chrome"
-        # Check if running on Ubuntu/Debian
         if [ -f /etc/os-release ]; then
             . /etc/os-release
             if [[ "$ID" == "ubuntu" ]] || [[ "$ID_LIKE" == *"ubuntu"* ]] || [[ "$ID_LIKE" == *"debian"* ]]; then
