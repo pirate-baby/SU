@@ -55,10 +55,16 @@ if ! command -v npx &>/dev/null; then
 fi
 
 echo "Starting Playwright MCP server on host (port 8931)..."
+# --host 0.0.0.0  : accept connections from Docker containers
+# --allowed-hosts *: disable the Host-header check so that requests arriving
+#   with "Host: host.docker.internal:8931" (from inside Docker) are not rejected.
+#   Without this, the server only accepts requests whose Host header matches
+#   "localhost" exactly, which fails for Docker's host.docker.internal alias.
 npx -y @playwright/mcp@latest \
     --browser chrome \
     --user-data-dir "$CHROME_USER_DATA_DIR" \
     --host 0.0.0.0 \
+    --allowed-hosts '*' \
     --port 8931 &
 PLAYWRIGHT_PID=$!
 
