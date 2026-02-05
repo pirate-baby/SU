@@ -38,6 +38,23 @@ if ! command -v npx &>/dev/null; then
     fi
 fi
 
+# Check Node.js version (Playwright MCP requires Node.js 18+)
+NODE_VERSION=$(node -v 2>/dev/null | sed 's/^v//' | cut -d. -f1)
+if [ -z "$NODE_VERSION" ] || [ "$NODE_VERSION" -lt 18 ]; then
+    echo "Error: Node.js 18 or higher is required for Playwright MCP."
+    echo "Current version: $(node -v 2>/dev/null || echo 'not found')"
+    echo ""
+    echo "To upgrade Node.js on Ubuntu:"
+    echo "  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -"
+    echo "  sudo apt-get install -y nodejs"
+    echo ""
+    echo "Or use nvm:"
+    echo "  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash"
+    echo "  source ~/.bashrc"
+    echo "  nvm install 20"
+    exit 1
+fi
+
 echo "Starting Playwright MCP server on host (port 8931) in extension mode..."
 # --extension      : connect to the existing browser via the Playwright MCP
 #   Bridge extension instead of launching a new instance. This avoids profile
