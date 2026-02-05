@@ -76,7 +76,13 @@ echo "Playwright MCP server started (PID $PLAYWRIGHT_PID)"
 # Ensure the Playwright MCP server is stopped when this script exits
 cleanup() {
     echo ""
-    echo "Shutting down Playwright MCP server (PID $PLAYWRIGHT_PID)..."
+    echo "Shutting down Playwright MCP server..."
+    # Kill whatever process is listening on port 8931 (npx may have forked,
+    # so the original $PLAYWRIGHT_PID may no longer be the actual server).
+    if lsof -ti :8931 >/dev/null 2>&1; then
+        lsof -ti :8931 | xargs kill 2>/dev/null || true
+    fi
+    # Also try the original PID in case lsof didn't find it
     kill "$PLAYWRIGHT_PID" 2>/dev/null || true
     wait "$PLAYWRIGHT_PID" 2>/dev/null || true
 }
@@ -102,4 +108,10 @@ echo ""
 
 # Keep the script alive so the Playwright MCP background process isn't killed.
 # The EXIT trap will clean it up when this script is interrupted (Ctrl-C / SIGTERM).
-wait "$PLAYWRIGHT_PID"
+# Note: We can't use `wait "$PLAYWRIGHT_PID"` because npx may fork and exit quickly
+# on some systems (e.g., Ubuntu), causing wait to return immediately.
+# Instead, we poll to check if something is still listening on port 8931.
+while lsof -ti :8931 >/dev/null 2>&1; do
+    sleep 5
+done
+echo "Playwright MCP server is no longer running on port 8931."
