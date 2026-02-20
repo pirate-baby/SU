@@ -6,18 +6,17 @@ experiences into long-term memory.  When a chat session ends, this agent
 reviews the full conversation and selectively writes noteworthy
 information to basic-memory for future recall by the Subconscious agent.
 """
-import logging
-
 from claude_agent_sdk import (
     ClaudeAgentOptions,
     ClaudeSDKClient,
     ResultMessage,
 )
 
+from app.logger import get_logger
 from app.memory_manager import get_basic_memory_mcp_config
 from app.session_manager import get_session
 
-logger = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 REM_SYSTEM_PROMPT = (
     "You are a memory consolidation system. You will receive a complete "
@@ -68,10 +67,7 @@ BASIC_MEMORY_ALLOWED_TOOLS = [
 
 
 def _build_transcript(messages: list) -> str:
-    """Build a plaintext transcript from session messages.
-
-    Excludes ``role='memory'`` entries since those are internal.
-    """
+    """Build a plaintext transcript from session messages."""
     lines: list[str] = []
     for msg in messages:
         if msg.role not in ("user", "assistant"):
@@ -82,19 +78,21 @@ def _build_transcript(messages: list) -> str:
 
 
 async def consolidate_memories(session_id: str) -> None:
-    """Review a completed session and write noteworthy memories.
+    """Review a completed session and write noteworthy memories."""
+    log.info("rem.started", session_id=session_id)
 
-    Runs as fire-and-forget — exceptions propagate to the caller
-    (memory_manager catches them).
-    """
     session = await get_session(session_id)
     if not session or not session.messages:
-        logger.debug("REM: no messages to consolidate for session %s", session_id[:8])
+        log.info("rem.no_messages", session_id=session_id)
         return
 
     transcript = _build_transcript(session.messages)
     if not transcript.strip():
+        log.info("rem.empty_transcript", session_id=session_id)
         return
+
+    message_count = len([m for m in session.messages if m.role in ("user", "assistant")])
+    log.info("rem.agent_starting", session_id=session_id, message_count=message_count)
 
     prompt = (
         "Here is the complete conversation transcript to review:\n\n"
@@ -121,11 +119,11 @@ async def consolidate_memories(session_id: str) -> None:
         async for message in client.receive_response():
             if isinstance(message, ResultMessage):
                 if message.is_error:
-                    logger.warning(
-                        "REM subagent error for session %s: %s",
-                        session_id[:8],
-                        message.result or "unknown",
+                    log.warning(
+                        "rem.agent_error",
+                        session_id=session_id,
+                        result=message.result or "unknown",
                     )
                     return
 
-    logger.info("REM: memory consolidation complete for session %s", session_id[:8])
+    log.info("rem.completed", session_id=session_id)

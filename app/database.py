@@ -69,4 +69,31 @@ async def init_database():
             ON sessions(status)
         """)
 
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                level TEXT NOT NULL,
+                event TEXT NOT NULL,
+                module TEXT NOT NULL,
+                session_id TEXT,
+                data TEXT
+            )
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_logs_timestamp
+            ON logs(timestamp)
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_logs_session_id
+            ON logs(session_id)
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_logs_level
+            ON logs(level)
+        """)
+
         await db.commit()

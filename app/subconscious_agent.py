@@ -4,10 +4,8 @@ Subconscious agent: background memory recall.
 Every N user messages the memory manager fires this agent. It reads the
 recent conversation context, searches basic-memory for anything relevant,
 and — if a match is found — stores a natural-sounding "thought" in the DB
-as a ``role='memory'`` message.  The main chat agent never sees this code;
-it only sees the injected thought as part of its conversation context.
+as a ``role='memory'`` message.
 """
-import logging
 from typing import Optional
 
 from claude_agent_sdk import (
@@ -18,10 +16,11 @@ from claude_agent_sdk import (
     TextBlock,
 )
 
+from app.logger import get_logger
 from app.memory_manager import get_basic_memory_mcp_config
 from app.session_manager import get_session, save_message
 
-logger = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 NO_MEMORY_SENTINEL = "NO_RELEVANT_MEMORIES"
 
@@ -68,25 +67,23 @@ def _build_conversation_summary(messages: list, limit: int = 10) -> str:
     for msg in recent:
         if msg.role in ("user", "assistant"):
             prefix = "User" if msg.role == "user" else "Assistant"
-            # Truncate very long messages to keep the prompt reasonable
             content = msg.content[:500] if len(msg.content) > 500 else msg.content
             lines.append(f"{prefix}: {content}")
     return "\n".join(lines)
 
 
 async def search_memories(session_id: str) -> Optional[str]:
-    """Search basic-memory for content relevant to the current session.
+    """Search basic-memory for content relevant to the current session."""
+    log.info("subconscious.started", session_id=session_id)
 
-    Returns the thought text that was saved, or None if nothing relevant
-    was found.  All exceptions are allowed to propagate to the caller
-    (memory_manager catches them).
-    """
     session = await get_session(session_id)
     if not session or not session.messages:
+        log.debug("subconscious.no_session", session_id=session_id)
         return None
 
     summary = _build_conversation_summary(session.messages)
     if not summary.strip():
+        log.debug("subconscious.empty_summary", session_id=session_id)
         return None
 
     prompt = (
@@ -110,6 +107,7 @@ async def search_memories(session_id: str) -> Optional[str]:
 
     thought: Optional[str] = None
 
+    log.info("subconscious.agent_starting", session_id=session_id)
     async with ClaudeSDKClient(options=options) as client:
         await client.query(prompt)
 
@@ -123,17 +121,18 @@ async def search_memories(session_id: str) -> Optional[str]:
                             thought += block.text
             elif isinstance(message, ResultMessage):
                 if message.is_error:
-                    logger.warning(
-                        "Subconscious subagent error: %s",
-                        message.result or "unknown",
+                    log.warning(
+                        "subconscious.agent_error",
+                        session_id=session_id,
+                        result=message.result or "unknown",
                     )
                     return None
 
     if not thought or NO_MEMORY_SENTINEL in thought:
-        logger.debug("Subconscious: no relevant memories for session %s", session_id[:8])
+        log.info("subconscious.no_relevant_memories", session_id=session_id)
         return None
 
     thought = thought.strip()
     await save_message(session_id, "memory", thought)
-    logger.info("Subconscious: injected memory for session %s", session_id[:8])
+    log.info("subconscious.memory_injected", session_id=session_id, thought_length=len(thought))
     return thought

@@ -3,7 +3,6 @@ FastAPI application with Claude chat functionality.
 """
 import asyncio
 import json
-import logging
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -12,9 +11,11 @@ from contextlib import asynccontextmanager
 
 from app.config import settings
 from app.database import init_database
+from app.logger import get_logger, start_log_writer, stop_log_writer
 from app.session_manager import (
     create_session,
     get_session,
+    get_all_sessions,
     session_exists,
     save_message,
     update_session_activity,
@@ -25,15 +26,18 @@ from app.memory_manager import on_user_message, on_session_end
 from app.models import SessionCreateResponse
 from app.website_agent import subagent_event_queue
 
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+log = get_logger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize database on startup."""
+    """Initialize database and log writer on startup."""
     await init_database()
+    await start_log_writer()
+    log.info("app.startup", version="2.0.0")
     yield
+    log.info("app.shutdown")
+    await stop_log_writer()
 
 
 app = FastAPI(
@@ -56,6 +60,7 @@ async def landing_page(request: Request):
 async def create_new_session():
     """Create a new chat session."""
     session_id = await create_session()
+    log.info("session.created", session_id=session_id)
     return SessionCreateResponse(
         session_id=session_id,
         redirect_url=f"/chat/{session_id}"
@@ -81,9 +86,90 @@ async def end_chat_session(session_id: str):
         raise HTTPException(status_code=404, detail="Session not found")
 
     await end_session(session_id)
+    log.info("session.ended", session_id=session_id)
     asyncio.ensure_future(on_session_end(session_id))
     return {"status": "ended"}
 
+
+# ---- Sessions list & log viewer API routes ----
+
+@app.get("/sessions", response_class=HTMLResponse)
+async def sessions_page(request: Request):
+    """Serve the session browser / log viewer page."""
+    return templates.TemplateResponse("sessions.html", {"request": request})
+
+
+@app.get("/api/sessions")
+async def list_sessions():
+    """Return all sessions (most recent first)."""
+    sessions = await get_all_sessions()
+    return [
+        {
+            "id": s.id,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+            "last_activity": s.last_activity.isoformat() if s.last_activity else None,
+            "status": s.status,
+            "message_count": len(s.messages) if s.messages else 0,
+        }
+        for s in sessions
+    ]
+
+
+@app.get("/api/sessions/{session_id}/messages")
+async def get_session_messages(session_id: str):
+    """Return all messages for a session."""
+    session = await get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return [
+        {
+            "id": m.id,
+            "role": m.role,
+            "content": m.content,
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+        }
+        for m in (session.messages or [])
+    ]
+
+
+@app.get("/api/logs")
+async def get_logs(
+    session_id: str | None = None,
+    level: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    limit: int = 500,
+):
+    """Query persisted log entries with optional filters."""
+    from app.database import get_db
+
+    clauses: list[str] = []
+    params: list[str | int] = []
+
+    if session_id:
+        clauses.append("session_id = ?")
+        params.append(session_id)
+    if level:
+        clauses.append("level = ?")
+        params.append(level.lower())
+    if since:
+        clauses.append("timestamp >= ?")
+        params.append(since)
+    if until:
+        clauses.append("timestamp <= ?")
+        params.append(until)
+
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    query = f"SELECT * FROM logs {where} ORDER BY timestamp ASC LIMIT ?"
+    params.append(limit)
+
+    async with get_db() as db:
+        cursor = await db.execute(query, params)
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+
+# ---- WebSocket chat ----
 
 async def send_message_history(websocket: WebSocket, session_id: str):
     session = await get_session(session_id)
@@ -98,16 +184,13 @@ async def send_message_history(websocket: WebSocket, session_id: str):
         })
 
 
-logger = logging.getLogger(__name__)
-
-
 async def _drain_subagent_events(websocket: WebSocket, stop: asyncio.Event):
     """Forward subagent progress events to the websocket until stop is set."""
-    logger.info("Drain task started")
+    log.debug("drain.started")
     while not stop.is_set():
         try:
             event = await asyncio.wait_for(subagent_event_queue.get(), timeout=0.25)
-            logger.info("Draining subagent event: %s", event.get("type"))
+            log.debug("drain.event", event_type=event.get("type"))
             await websocket.send_json({
                 "type": "subagent_event",
                 "subtype": event.get("type"),
@@ -116,9 +199,9 @@ async def _drain_subagent_events(websocket: WebSocket, stop: asyncio.Event):
         except asyncio.TimeoutError:
             continue
         except Exception:
-            logger.exception("Drain task error")
+            log.exception("drain.error")
             break
-    logger.info("Drain task stopped")
+    log.debug("drain.stopped")
 
 
 async def stream_claude_response(websocket: WebSocket, session_id: str, user_message: str, claude: ClaudeChat):
@@ -146,6 +229,12 @@ async def stream_claude_response(websocket: WebSocket, session_id: str, user_mes
                     "content": event["content"]
                 })
             elif event_type == "tool_use":
+                log.info(
+                    "chat.tool_use",
+                    session_id=session_id,
+                    tool_name=event["name"],
+                    tool_id=event["id"],
+                )
                 await websocket.send_json({
                     "type": "tool_use",
                     "id": event["id"],
@@ -153,6 +242,12 @@ async def stream_claude_response(websocket: WebSocket, session_id: str, user_mes
                     "input": event["input"],
                 })
             elif event_type == "tool_result":
+                log.info(
+                    "chat.tool_result",
+                    session_id=session_id,
+                    tool_use_id=event["tool_use_id"],
+                    is_error=event["is_error"],
+                )
                 await websocket.send_json({
                     "type": "tool_result",
                     "tool_use_id": event["tool_use_id"],
@@ -160,6 +255,7 @@ async def stream_claude_response(websocket: WebSocket, session_id: str, user_mes
                     "is_error": event["is_error"],
                 })
             elif event_type == "error":
+                log.error("chat.stream_error", session_id=session_id, content=event["content"])
                 await websocket.send_json({
                     "type": "error",
                     "content": event["content"]
@@ -169,17 +265,12 @@ async def stream_claude_response(websocket: WebSocket, session_id: str, user_mes
         await drain_task
 
     await save_message(session_id, "assistant", full_response)
+    log.info("chat.assistant_response", session_id=session_id, length=len(full_response))
     await websocket.send_json({"type": "assistant_end"})
 
 
 async def _inject_pending_memories(session_id: str, claude: ClaudeChat) -> None:
-    """Feed any pending memory thoughts into the SDK client's internal history.
-
-    Pending memories (role='memory') are sent as a silent context-setting
-    exchange so the main agent perceives them as prior knowledge.  The
-    memory rows are then marked as consumed by updating their role to
-    'memory_consumed' so they are not re-injected on subsequent messages.
-    """
+    """Feed any pending memory thoughts into the SDK client's internal history."""
     session = await get_session(session_id)
     if not session or not session.messages:
         return
@@ -188,26 +279,25 @@ async def _inject_pending_memories(session_id: str, claude: ClaudeChat) -> None:
     if not pending:
         return
 
-    # Combine all pending thoughts into a single context block
     thoughts = "\n\n".join(m.content for m in pending)
-    context_msg = (
-        f"<context>\n{thoughts}\n</context>"
-    )
+    context_msg = f"<context>\n{thoughts}\n</context>"
 
-    # Send as a user message and silently consume the response so the
-    # thoughts enter the SDK's internal conversation history.
+    log.info("memory.injecting", session_id=session_id, count=len(pending))
+
     async for _ in claude.send_message(context_msg):
         pass
 
-    # Mark consumed so we don't re-inject next turn
     from app.session_manager import mark_memories_consumed
     for m in pending:
         if m.id is not None:
             await mark_memories_consumed(m.id)
 
+    log.info("memory.injected", session_id=session_id, count=len(pending))
+
 
 async def handle_user_message(websocket: WebSocket, session_id: str, user_message: str, claude: ClaudeChat):
     await save_message(session_id, "user", user_message)
+    log.info("chat.user_message", session_id=session_id, length=len(user_message))
     asyncio.ensure_future(on_user_message(session_id))
     await websocket.send_json({
         "type": "user_message",
@@ -218,6 +308,7 @@ async def handle_user_message(websocket: WebSocket, session_id: str, user_messag
         await _inject_pending_memories(session_id, claude)
         await stream_claude_response(websocket, session_id, user_message, claude)
     except Exception as e:
+        log.exception("chat.handle_error", session_id=session_id, error=str(e))
         await websocket.send_json({
             "type": "error",
             "content": f"Error generating response: {str(e)}"
@@ -229,17 +320,17 @@ async def handle_user_message(websocket: WebSocket, session_id: str, user_messag
 @app.websocket("/ws/chat/{session_id}")
 async def websocket_chat(websocket: WebSocket, session_id: str):
     """WebSocket endpoint for chat."""
-    print(f"WebSocket connection attempt for session {session_id}")
+    log.info("ws.connect_attempt", session_id=session_id)
 
     try:
         await websocket.accept()
-        print(f"WebSocket accepted for session {session_id}")
+        log.info("ws.accepted", session_id=session_id)
     except Exception as e:
-        print(f"Failed to accept WebSocket: {str(e)}")
+        log.error("ws.accept_failed", session_id=session_id, error=str(e))
         return
 
     if not await session_exists(session_id):
-        print(f"Session {session_id} not found")
+        log.warning("ws.session_not_found", session_id=session_id)
         await websocket.send_json({
             "type": "error",
             "content": "Session not found"
@@ -251,13 +342,13 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
     await update_session_activity(session_id)
 
     try:
-        # Only pass token if it's actually set to avoid interfering with claude login auth
         if settings.claude_code_oauth_token:
             claude = ClaudeChat(oauth_token=settings.claude_code_oauth_token)
         else:
             claude = ClaudeChat()
+        log.info("ws.claude_initialized", session_id=session_id)
     except Exception as e:
-        print(f"Failed to initialize ClaudeChat: {str(e)}")
+        log.exception("ws.claude_init_failed", session_id=session_id, error=str(e))
         await websocket.send_json({
             "type": "error",
             "content": f"Failed to initialize Claude client: {str(e)}"
@@ -277,17 +368,15 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
                         await handle_user_message(websocket, session_id, user_message, claude)
 
     except WebSocketDisconnect:
-        print(f"WebSocket disconnected for session {session_id}")
+        log.info("ws.disconnected", session_id=session_id)
     except Exception as e:
-        print(f"WebSocket error for session {session_id}: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        log.exception("ws.error", session_id=session_id, error=str(e))
         try:
             await websocket.send_json({
                 "type": "error",
                 "content": f"Connection error: {str(e)}"
             })
-        except:
+        except Exception:
             pass
 
 

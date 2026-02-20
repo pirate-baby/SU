@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sessions &amp; Logs</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg: #0f1117;
+            --surface: #1a1d27;
+            --surface2: #232730;
+            --border: #2e3340;
+            --text: #e4e4e7;
+            --text-muted: #71717a;
+            --accent: #6366f1;
+            --accent-dim: #4f46e5;
+            --green: #22c55e;
+            --yellow: #eab308;
+            --red: #ef4444;
+            --blue: #3b82f6;
+            --mono: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Top bar */
+        .topbar {
+            height: 48px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            gap: 16px;
+        }
+        .topbar h1 { font-size: 14px; font-weight: 600; letter-spacing: 0.02em; }
+        .topbar a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 13px;
+        }
+        .topbar a:hover { color: var(--text); }
+
+        /* Layout: sidebar + main */
+        .layout {
+            display: flex;
+            height: calc(100vh - 48px);
+        }
+
+        /* Session sidebar */
+        .sidebar {
+            width: 280px;
+            min-width: 280px;
+            border-right: 1px solid var(--border);
+            background: var(--surface);
+            display: flex;
+            flex-direction: column;
+        }
+        .sidebar-header {
+            padding: 12px;
+            border-bottom: 1px solid var(--border);
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-muted);
+        }
+        .session-list {
+            flex: 1;
+            overflow-y: auto;
+        }
+        .session-item {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+        .session-item:hover { background: var(--surface2); }
+        .session-item.active { background: var(--accent-dim); }
+        .session-item .sid {
+            font-family: var(--mono);
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text);
+        }
+        .session-item .meta {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 2px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .session-item .badge {
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 8px;
+            font-weight: 600;
+        }
+        .badge-active { background: #166534; color: #4ade80; }
+        .badge-ended { background: #44403c; color: #a8a29e; }
+
+        /* Main panels */
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
+        /* Panel controls */
+        .panel-controls {
+            height: 40px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            padding: 0 12px;
+            gap: 12px;
+            font-size: 12px;
+        }
+        .panel-controls label { color: var(--text-muted); }
+        .panel-controls select, .panel-controls input {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-family: inherit;
+        }
+        .panel-controls select:focus, .panel-controls input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        .sync-badge {
+            margin-left: auto;
+            background: var(--accent-dim);
+            color: var(--text);
+            padding: 2px 8px;
+            border-radius: 8px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        /* Dual-panel container */
+        .panels {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+
+        .panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+        .panel + .panel { border-left: 1px solid var(--border); }
+
+        .panel-header {
+            height: 36px;
+            padding: 0 12px;
+            display: flex;
+            align-items: center;
+            background: var(--surface2);
+            border-bottom: 1px solid var(--border);
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-muted);
+        }
+        .panel-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0;
+        }
+
+        /* Messages panel */
+        .msg-row {
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--border);
+            font-size: 13px;
+            line-height: 1.5;
+            position: relative;
+        }
+        .msg-row:hover { background: rgba(99, 102, 241, 0.05); }
+        .msg-row.highlighted { background: rgba(99, 102, 241, 0.12); }
+        .msg-time {
+            font-family: var(--mono);
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-right: 8px;
+            white-space: nowrap;
+        }
+        .msg-role {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin-right: 8px;
+            padding: 1px 6px;
+            border-radius: 4px;
+        }
+        .msg-role-user { background: #1e3a5f; color: #60a5fa; }
+        .msg-role-assistant { background: #1a2e1a; color: #4ade80; }
+        .msg-role-memory { background: #3b1f5e; color: #c084fc; }
+        .msg-role-memory_consumed { background: #2d2235; color: #a78bfa; }
+        .msg-content {
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: var(--text);
+            margin-top: 4px;
+        }
+
+        /* Logs panel */
+        .log-row {
+            padding: 4px 12px;
+            border-bottom: 1px solid rgba(46, 51, 64, 0.5);
+            font-family: var(--mono);
+            font-size: 12px;
+            line-height: 1.6;
+            display: flex;
+            gap: 8px;
+            align-items: baseline;
+            cursor: default;
+        }
+        .log-row:hover { background: rgba(99, 102, 241, 0.05); }
+        .log-row.highlighted { background: rgba(99, 102, 241, 0.12); }
+        .log-time {
+            color: var(--text-muted);
+            font-size: 11px;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .log-level {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            padding: 0 5px;
+            border-radius: 3px;
+            flex-shrink: 0;
+            min-width: 50px;
+            text-align: center;
+        }
+        .log-level-debug { background: #1e293b; color: #94a3b8; }
+        .log-level-info { background: #172554; color: #60a5fa; }
+        .log-level-warning { background: #422006; color: #fbbf24; }
+        .log-level-error { background: #450a0a; color: #f87171; }
+        .log-event {
+            color: var(--text);
+            flex-shrink: 0;
+            font-weight: 500;
+        }
+        .log-data {
+            color: var(--text-muted);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* Empty state */
+        .empty-state {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #4b5563; }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <h1>SU Session Inspector</h1>
+        <a href="/">Back to Chat</a>
+    </div>
+
+    <div class="layout">
+        <div class="sidebar">
+            <div class="sidebar-header">Sessions</div>
+            <div class="session-list" id="session-list">
+                <div class="empty-state">Loading...</div>
+            </div>
+        </div>
+
+        <div class="main">
+            <div class="panel-controls">
+                <label>Level:</label>
+                <select id="level-filter">
+                    <option value="">All</option>
+                    <option value="debug">Debug</option>
+                    <option value="info" selected>Info+</option>
+                    <option value="warning">Warning+</option>
+                    <option value="error">Error</option>
+                </select>
+                <label>Search:</label>
+                <input type="text" id="log-search" placeholder="Filter events..." style="width: 160px;">
+                <span class="sync-badge" id="sync-badge">Time Sync ON</span>
+            </div>
+
+            <div class="panels">
+                <div class="panel">
+                    <div class="panel-header">Session Messages</div>
+                    <div class="panel-body" id="messages-panel">
+                        <div class="empty-state">Select a session</div>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-header">System Logs</div>
+                    <div class="panel-body" id="logs-panel">
+                        <div class="empty-state">Select a session</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        const sessionList = document.getElementById('session-list');
+        const messagesPanel = document.getElementById('messages-panel');
+        const logsPanel = document.getElementById('logs-panel');
+        const levelFilter = document.getElementById('level-filter');
+        const logSearch = document.getElementById('log-search');
+        const syncBadge = document.getElementById('sync-badge');
+
+        let currentSessionId = null;
+        let allMessages = [];
+        let allLogs = [];
+        let syncEnabled = true;
+
+        syncBadge.addEventListener('click', () => {
+            syncEnabled = !syncEnabled;
+            syncBadge.textContent = syncEnabled ? 'Time Sync ON' : 'Time Sync OFF';
+            syncBadge.style.opacity = syncEnabled ? 1 : 0.5;
+        });
+
+        async function loadSessions() {
+            const res = await fetch('/api/sessions');
+            const sessions = await res.json();
+            if (!sessions.length) {
+                sessionList.innerHTML = '<div class="empty-state">No sessions yet</div>';
+                return;
+            }
+            sessionList.innerHTML = sessions.map(s => {
+                const dt = s.last_activity ? new Date(s.last_activity) : null;
+                const timeStr = dt ? dt.toLocaleString() : '—';
+                const badgeClass = s.status === 'active' ? 'badge-active' : 'badge-ended';
+                return `<div class="session-item" data-id="${s.id}">
+                    <div class="sid">${s.id.slice(0, 8)}</div>
+                    <div class="meta">
+                        <span>${timeStr}</span>
+                        <span class="badge ${badgeClass}">${s.status}</span>
+                    </div>
+                    <div class="meta"><span>${s.message_count} messages</span></div>
+                </div>`;
+            }).join('');
+
+            sessionList.querySelectorAll('.session-item').forEach(el => {
+                el.addEventListener('click', () => selectSession(el.dataset.id));
+            });
+        }
+
+        async function selectSession(sessionId) {
+            currentSessionId = sessionId;
+
+            // Highlight in sidebar
+            sessionList.querySelectorAll('.session-item').forEach(el => {
+                el.classList.toggle('active', el.dataset.id === sessionId);
+            });
+
+            // Load messages + logs in parallel
+            const [msgRes, logRes] = await Promise.all([
+                fetch(`/api/sessions/${sessionId}/messages`),
+                fetch(`/api/logs?session_id=${sessionId}&limit=2000`),
+            ]);
+            allMessages = await msgRes.json();
+            allLogs = await logRes.json();
+
+            renderMessages();
+            renderLogs();
+        }
+
+        function fmtTime(iso) {
+            if (!iso) return '—';
+            const d = new Date(iso);
+            return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                + '.' + String(d.getMilliseconds()).padStart(3, '0');
+        }
+
+        function renderMessages() {
+            if (!allMessages.length) {
+                messagesPanel.innerHTML = '<div class="empty-state">No messages</div>';
+                return;
+            }
+            messagesPanel.innerHTML = allMessages.map((m, i) => {
+                const roleClass = `msg-role-${m.role}`;
+                const content = m.content.length > 2000 ? m.content.slice(0, 2000) + '...' : m.content;
+                return `<div class="msg-row" data-ts="${m.created_at || ''}" data-idx="${i}">
+                    <span class="msg-time">${fmtTime(m.created_at)}</span>
+                    <span class="msg-role ${roleClass}">${m.role}</span>
+                    <div class="msg-content">${escapeHtml(content)}</div>
+                </div>`;
+            }).join('');
+
+            // Click to sync
+            messagesPanel.querySelectorAll('.msg-row').forEach(el => {
+                el.addEventListener('click', () => {
+                    if (!syncEnabled) return;
+                    const ts = el.dataset.ts;
+                    if (ts) syncLogsToTime(ts, el);
+                });
+            });
+        }
+
+        function renderLogs() {
+            const levelVal = levelFilter.value;
+            const searchVal = logSearch.value.toLowerCase();
+
+            const levelOrder = { debug: 0, info: 1, warning: 2, error: 3 };
+            const minLevel = levelOrder[levelVal] ?? 0;
+
+            const filtered = allLogs.filter(l => {
+                const ll = levelOrder[l.level] ?? 0;
+                if (ll < minLevel) return false;
+                if (searchVal && !l.event.toLowerCase().includes(searchVal)
+                    && !(l.data || '').toLowerCase().includes(searchVal)) return false;
+                return true;
+            });
+
+            if (!filtered.length) {
+                logsPanel.innerHTML = '<div class="empty-state">No logs match filter</div>';
+                return;
+            }
+
+            logsPanel.innerHTML = filtered.map((l, i) => {
+                const data = l.data && l.data !== '{}' ? l.data : '';
+                let dataStr = '';
+                if (data) {
+                    try {
+                        const parsed = JSON.parse(data);
+                        dataStr = Object.entries(parsed)
+                            .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
+                            .join(' ');
+                    } catch { dataStr = data; }
+                }
+                return `<div class="log-row" data-ts="${l.timestamp}" data-idx="${i}">
+                    <span class="log-time">${fmtTime(l.timestamp)}</span>
+                    <span class="log-level log-level-${l.level}">${l.level}</span>
+                    <span class="log-event">${escapeHtml(l.event)}</span>
+                    <span class="log-data">${escapeHtml(dataStr)}</span>
+                </div>`;
+            }).join('');
+
+            // Click to sync messages
+            logsPanel.querySelectorAll('.log-row').forEach(el => {
+                el.addEventListener('click', () => {
+                    if (!syncEnabled) return;
+                    const ts = el.dataset.ts;
+                    if (ts) syncMessagesToTime(ts, el);
+                });
+            });
+        }
+
+        function syncLogsToTime(targetTs, sourceEl) {
+            // Find the closest log row by time
+            const logRows = logsPanel.querySelectorAll('.log-row');
+            if (!logRows.length) return;
+
+            // Clear highlights
+            messagesPanel.querySelectorAll('.highlighted').forEach(e => e.classList.remove('highlighted'));
+            logsPanel.querySelectorAll('.highlighted').forEach(e => e.classList.remove('highlighted'));
+            sourceEl.classList.add('highlighted');
+
+            const targetTime = new Date(targetTs).getTime();
+            let closest = logRows[0];
+            let closestDiff = Infinity;
+
+            logRows.forEach(row => {
+                const ts = row.dataset.ts;
+                if (!ts) return;
+                const diff = Math.abs(new Date(ts).getTime() - targetTime);
+                if (diff < closestDiff) {
+                    closestDiff = diff;
+                    closest = row;
+                }
+            });
+
+            closest.classList.add('highlighted');
+            closest.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }
+
+        function syncMessagesToTime(targetTs, sourceEl) {
+            const msgRows = messagesPanel.querySelectorAll('.msg-row');
+            if (!msgRows.length) return;
+
+            messagesPanel.querySelectorAll('.highlighted').forEach(e => e.classList.remove('highlighted'));
+            logsPanel.querySelectorAll('.highlighted').forEach(e => e.classList.remove('highlighted'));
+            sourceEl.classList.add('highlighted');
+
+            const targetTime = new Date(targetTs).getTime();
+            let closest = msgRows[0];
+            let closestDiff = Infinity;
+
+            msgRows.forEach(row => {
+                const ts = row.dataset.ts;
+                if (!ts) return;
+                const diff = Math.abs(new Date(ts).getTime() - targetTime);
+                if (diff < closestDiff) {
+                    closestDiff = diff;
+                    closest = row;
+                }
+            });
+
+            closest.classList.add('highlighted');
+            closest.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        // Filter controls
+        levelFilter.addEventListener('change', renderLogs);
+        logSearch.addEventListener('input', renderLogs);
+
+        // Boot
+        loadSessions();
+
+        // Check for session_id in URL hash
+        if (window.location.hash) {
+            const hashId = window.location.hash.slice(1);
+            if (hashId) setTimeout(() => selectSession(hashId), 500);
+        }
+    })();
+    </script>
+</body>
+</html>

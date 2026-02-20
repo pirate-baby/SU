@@ -6,10 +6,11 @@ at the appropriate lifecycle moments. All errors are silently logged so
 the main chat flow is never disrupted.
 """
 import asyncio
-import logging
 from typing import Optional
 
-logger = logging.getLogger(__name__)
+from app.logger import get_logger
+
+log = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # In-memory state (resets on process restart — acceptable)
@@ -34,20 +35,18 @@ def get_basic_memory_mcp_config() -> dict:
 # ---------------------------------------------------------------------------
 
 async def on_user_message(session_id: str) -> None:
-    """Called after each user message is saved.
-
-    Increments the per-session counter and fires the Subconscious agent
-    every SUBCONSCIOUS_INTERVAL messages.
-    """
+    """Called after each user message is saved."""
     _session_counters[session_id] = _session_counters.get(session_id, 0) + 1
     count = _session_counters[session_id]
+    log.debug("memory.message_count", session_id=session_id, count=count)
 
     if count % SUBCONSCIOUS_INTERVAL == 0:
-        # Cancel any still-running subconscious task for this session
         existing = _pending_tasks.get(session_id)
         if existing and not existing.done():
             existing.cancel()
+            log.info("memory.subconscious_cancelled", session_id=session_id)
 
+        log.info("memory.subconscious_triggered", session_id=session_id, message_count=count)
         task = asyncio.create_task(
             _run_subconscious(session_id),
             name=f"subconscious-{session_id[:8]}",
@@ -57,12 +56,13 @@ async def on_user_message(session_id: str) -> None:
 
 async def on_session_end(session_id: str) -> None:
     """Called when a session is ended. Spawns REM as a fire-and-forget task."""
-    # Cancel any pending subconscious work — session is over
     existing = _pending_tasks.pop(session_id, None)
     if existing and not existing.done():
         existing.cancel()
+        log.info("memory.subconscious_cancelled_for_end", session_id=session_id)
     _session_counters.pop(session_id, None)
 
+    log.info("memory.rem_triggered", session_id=session_id)
     asyncio.create_task(
         _run_rem(session_id),
         name=f"rem-{session_id[:8]}",
@@ -78,9 +78,9 @@ async def _run_subconscious(session_id: str) -> None:
         from app.subconscious_agent import search_memories
         await search_memories(session_id)
     except asyncio.CancelledError:
-        logger.debug("Subconscious task cancelled for session %s", session_id[:8])
+        log.debug("memory.subconscious_task_cancelled", session_id=session_id)
     except Exception:
-        logger.exception("Subconscious agent failed for session %s", session_id[:8])
+        log.exception("memory.subconscious_failed", session_id=session_id)
     finally:
         _pending_tasks.pop(session_id, None)
 
@@ -90,4 +90,4 @@ async def _run_rem(session_id: str) -> None:
         from app.rem_agent import consolidate_memories
         await consolidate_memories(session_id)
     except Exception:
-        logger.exception("REM agent failed for session %s", session_id[:8])
+        log.exception("memory.rem_failed", session_id=session_id)

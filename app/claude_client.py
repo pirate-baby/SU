@@ -1,7 +1,6 @@
 """
 Claude SDK client wrapper for chat functionality.
 """
-import logging
 import os
 from typing import Any, AsyncGenerator, Optional
 from claude_agent_sdk import (
@@ -16,10 +15,11 @@ from claude_agent_sdk import (
     ResultMessage,
 )
 from app.config import settings
+from app.logger import get_logger
 from app.website_agent import website_mcp_server
 from app.website_models import WEBSITE_REGISTRY
 
-logger = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 
 def _build_system_prompt() -> str:
@@ -90,14 +90,18 @@ class ClaudeChat:
 
     async def connect(self):
         """Open and connect the SDK client. Must be called before send_message."""
+        log.info("sdk.connecting")
         self._client = ClaudeSDKClient(options=self.options)
         await self._client.connect()
+        log.info("sdk.connected")
 
     async def disconnect(self):
         """Disconnect the SDK client."""
         if self._client:
+            log.info("sdk.disconnecting")
             await self._client.disconnect()
             self._client = None
+            log.info("sdk.disconnected")
 
     async def __aenter__(self):
         await self.connect()
@@ -110,11 +114,7 @@ class ClaudeChat:
         self,
         message: str,
     ) -> AsyncGenerator[dict[str, Any], None]:
-        """Yield structured events: text chunks, tool calls, and tool results.
-
-        The underlying SDK client persists across calls, so conversation
-        history is maintained automatically between messages.
-        """
+        """Yield structured events: text chunks, tool calls, and tool results."""
         if not self._client:
             raise RuntimeError("ClaudeChat client is not connected. Call connect() or use as async context manager.")
 
@@ -122,32 +122,38 @@ class ClaudeChat:
             await self._client.query(message)
 
             async for msg in self._client.receive_response():
-                logger.info("SDK message: type=%s", type(msg).__name__)
+                msg_type = type(msg).__name__
+                log.debug("sdk.message", msg_type=msg_type)
 
                 if isinstance(msg, SystemMessage):
-                    logger.info(
-                        "SystemMessage subtype=%s data=%s",
-                        msg.subtype,
-                        msg.data,
+                    log.info(
+                        "sdk.system_message",
+                        subtype=msg.subtype,
+                        data=str(msg.data)[:300],
                     )
                     if msg.subtype == "init":
                         mcp_servers = msg.data.get("mcp_servers", [])
                         for srv in mcp_servers:
-                            if srv.get("status") != "connected":
-                                logger.error(
-                                    "MCP server failed to connect: %s", srv
+                            name = srv.get("name", "unknown")
+                            status = srv.get("status", "unknown")
+                            if status != "connected":
+                                log.error(
+                                    "sdk.mcp_connect_failed",
+                                    server_name=name,
+                                    server_status=status,
                                 )
+                            else:
+                                log.info("sdk.mcp_connected", server_name=name)
 
                 elif isinstance(msg, UserMessage):
-                    # Tool results come back as UserMessage in the Claude API.
                     content = msg.content
                     if isinstance(content, list):
                         for block in content:
                             if isinstance(block, ToolResultBlock):
-                                logger.info(
-                                    "  ToolResult via UserMessage tool_use_id=%s is_error=%s",
-                                    block.tool_use_id,
-                                    block.is_error,
+                                log.info(
+                                    "sdk.tool_result",
+                                    tool_use_id=block.tool_use_id,
+                                    is_error=block.is_error,
                                 )
                                 yield {
                                     "type": "tool_result",
@@ -156,21 +162,24 @@ class ClaudeChat:
                                     "is_error": block.is_error or False,
                                 }
                             else:
-                                logger.info(
-                                    "  UserMessage block type=%s",
-                                    type(block).__name__,
+                                log.debug(
+                                    "sdk.user_block",
+                                    block_type=type(block).__name__,
                                 )
                     else:
-                        logger.info("  UserMessage content=%s", str(content)[:200])
+                        log.debug("sdk.user_content", content=str(content)[:200])
 
                 elif isinstance(msg, AssistantMessage):
                     for block in msg.content:
-                        logger.info(
-                            "  block type=%s", type(block).__name__
-                        )
+                        log.debug("sdk.assistant_block", block_type=type(block).__name__)
                         if isinstance(block, TextBlock):
                             yield {"type": "text", "content": block.text}
                         elif isinstance(block, ToolUseBlock):
+                            log.info(
+                                "sdk.tool_use",
+                                tool_name=block.name,
+                                tool_id=block.id,
+                            )
                             yield {
                                 "type": "tool_use",
                                 "id": block.id,
@@ -186,11 +195,11 @@ class ClaudeChat:
                             }
 
                 elif isinstance(msg, ResultMessage):
-                    logger.info(
-                        "ResultMessage subtype=%s is_error=%s result=%s",
-                        getattr(msg, "subtype", None),
-                        msg.is_error,
-                        (msg.result or "")[:500],
+                    log.info(
+                        "sdk.result",
+                        subtype=getattr(msg, "subtype", None),
+                        is_error=msg.is_error,
+                        result=(msg.result or "")[:500],
                     )
                     if msg.is_error:
                         yield {
@@ -199,5 +208,5 @@ class ClaudeChat:
                         }
 
         except Exception as e:
-            logger.exception("Error in send_message")
+            log.exception("sdk.send_error", error=str(e))
             yield {"type": "error", "content": f"Error communicating with Claude: {str(e)}"}

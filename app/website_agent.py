@@ -4,7 +4,6 @@ to interact with pre-registered websites and return structured data.
 """
 import asyncio
 import json
-import logging
 from typing import Any
 
 import inspect
@@ -12,9 +11,7 @@ import inspect
 from mcp.server import Server as _McpServer
 
 # Monkey-patch: mcp 0.9.x+ removed the `version` kwarg from Server.__init__,
-# but claude-agent-sdk's create_sdk_mcp_server still passes it.  We must
-# preserve it as an instance attribute because the SDK's control-protocol
-# handler reads `server.version` during MCP initialization.
+# but claude-agent-sdk's create_sdk_mcp_server still passes it.
 _orig_server_init = _McpServer.__init__
 if "version" not in inspect.signature(_orig_server_init).parameters:
     def _patched_server_init(self, name, **kwargs):
@@ -36,25 +33,20 @@ from claude_agent_sdk import (
     tool,
 )
 
+from app.logger import get_logger
 from app.website_models import WEBSITE_REGISTRY
 
-logger = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 # Maximum seconds to wait for the subagent to finish browsing.
 SUBAGENT_TIMEOUT_SECONDS = 120
 
 # Module-level queue for streaming subagent progress to the frontend.
-# Consumers (e.g. main.py) can drain this while the tool runs.
 subagent_event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
 
 def _build_playwright_mcp_config() -> dict:
-    """Connect to Playwright MCP running as an SSE server on the host.
-
-    The Playwright MCP server must be started on the host machine (not inside
-    the container) so it has access to the real Chrome installation and user
-    profile.  Inside Docker, ``host.docker.internal`` resolves to the host.
-    """
+    """Connect to Playwright MCP running as an SSE server on the host."""
     return {
         "type": "sse",
         "url": "http://host.docker.internal:8931/sse",
@@ -140,8 +132,11 @@ async def browse_website(args: dict[str, Any]) -> dict[str, Any]:
     website_name = args["website"].lower()
     user_instructions = args.get("instructions", "")
 
+    log.info("website.tool_called", website=website_name, has_instructions=bool(user_instructions))
+
     config = WEBSITE_REGISTRY.get(website_name)
     if config is None:
+        log.warning("website.unknown", website=website_name, available=list(WEBSITE_REGISTRY.keys()))
         return {
             "content": [{
                 "type": "text",
@@ -213,18 +208,18 @@ async def browse_website(args: dict[str, Any]) -> dict[str, Any]:
             nonlocal structured_result, text_result
 
             def _emit(event: dict[str, Any]):
-                logger.info("Subagent emit: %s", event.get("type"))
+                log.debug("website.subagent_emit", event_type=event.get("type"))
                 subagent_event_queue.put_nowait(event)
 
             _emit({"type": "subagent_status", "message": f"Launching browser for {config.url}"})
+            log.info("website.subagent_launching", website=website_name, url=config.url)
 
             async with ClaudeSDKClient(options=subagent_options) as client:
                 await client.query(prompt)
 
                 async for message in client.receive_response():
-                    logger.info(
-                        "Subagent message: type=%s", type(message).__name__
-                    )
+                    msg_type = type(message).__name__
+                    log.debug("website.subagent_message", msg_type=msg_type)
 
                     if isinstance(message, SystemMessage):
                         if message.subtype == "init":
@@ -233,15 +228,16 @@ async def browse_website(args: dict[str, Any]) -> dict[str, Any]:
                                 status = srv.get("status", "unknown")
                                 name = srv.get("name", "unknown")
                                 if status != "connected":
-                                    logger.error("MCP server %s failed: %s", name, srv)
+                                    log.error("website.mcp_failed", server_name=name, server_status=status)
                                     _emit({"type": "subagent_status", "message": f"MCP server {name} failed to connect"})
                                 else:
-                                    logger.info("MCP server %s connected", name)
+                                    log.info("website.mcp_connected", server_name=name)
                             _emit({"type": "subagent_status", "message": "Subagent connected"})
 
                     elif isinstance(message, AssistantMessage):
                         for block in message.content:
                             if isinstance(block, ToolUseBlock):
+                                log.debug("website.subagent_tool", tool_name=block.name)
                                 _emit({
                                     "type": "subagent_tool",
                                     "name": block.name,
@@ -260,6 +256,7 @@ async def browse_website(args: dict[str, Any]) -> dict[str, Any]:
                             text_result = message.result
 
                         if message.is_error:
+                            log.error("website.subagent_error", website=website_name, result=message.result)
                             _emit({"type": "subagent_status", "message": f"Error: {message.result or 'Unknown'}"})
                             raise RuntimeError(
                                 message.result or "Subagent error"
@@ -272,6 +269,7 @@ async def browse_website(args: dict[str, Any]) -> dict[str, Any]:
 
         if structured_result:
             validated = config.response_model.model_validate(structured_result)
+            log.info("website.success", website=website_name, result_type="structured")
             return {
                 "content": [{
                     "type": "text",
@@ -284,6 +282,7 @@ async def browse_website(args: dict[str, Any]) -> dict[str, Any]:
             try:
                 parsed = json.loads(text_result)
                 validated = config.response_model.model_validate(parsed)
+                log.info("website.success", website=website_name, result_type="text_parsed")
                 return {
                     "content": [{
                         "type": "text",
@@ -291,8 +290,9 @@ async def browse_website(args: dict[str, Any]) -> dict[str, Any]:
                     }],
                 }
             except (json.JSONDecodeError, Exception) as e:
-                logger.warning("Failed to parse subagent text as JSON: %s", e)
+                log.warning("website.parse_failed", website=website_name, error=str(e))
 
+        log.warning("website.no_structured_data", website=website_name)
         return {
             "content": [{
                 "type": "text",
@@ -305,10 +305,10 @@ async def browse_website(args: dict[str, Any]) -> dict[str, Any]:
         }
 
     except asyncio.TimeoutError:
-        logger.error(
-            "Subagent timed out after %d seconds for website=%s",
-            SUBAGENT_TIMEOUT_SECONDS,
-            website_name,
+        log.error(
+            "website.timeout",
+            website=website_name,
+            timeout_seconds=SUBAGENT_TIMEOUT_SECONDS,
         )
         return {
             "content": [{
@@ -322,7 +322,7 @@ async def browse_website(args: dict[str, Any]) -> dict[str, Any]:
         }
 
     except Exception as e:
-        logger.exception("Subagent execution failed")
+        log.exception("website.execution_failed", website=website_name, error=str(e))
         return {
             "content": [{
                 "type": "text",

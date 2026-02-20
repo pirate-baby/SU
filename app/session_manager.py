@@ -6,7 +6,10 @@ import json
 from typing import Optional, List
 from datetime import datetime, timedelta
 from app.database import get_db
+from app.logger import get_logger
 from app.models import Session, Message
+
+log = get_logger(__name__)
 
 
 async def create_session() -> str:
@@ -20,6 +23,7 @@ async def create_session() -> str:
         )
         await db.commit()
 
+    log.info("db.session_created", session_id=session_id)
     return session_id
 
 
@@ -48,6 +52,28 @@ async def get_session(session_id: str) -> Optional[Session]:
         return Session(**session_data, messages=messages)
 
 
+async def get_all_sessions() -> List[Session]:
+    """Return all sessions ordered by most recent activity, with messages."""
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT * FROM sessions ORDER BY last_activity DESC"
+        )
+        session_rows = await cursor.fetchall()
+
+        sessions: List[Session] = []
+        for srow in session_rows:
+            sdata = dict(srow)
+            cursor = await db.execute(
+                "SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC",
+                (sdata["id"],)
+            )
+            message_rows = await cursor.fetchall()
+            messages = [Message(**dict(r)) for r in message_rows]
+            sessions.append(Session(**sdata, messages=messages))
+
+        return sessions
+
+
 async def update_session_activity(session_id: str):
     """Update last_activity timestamp for a session."""
     async with get_db() as db:
@@ -66,6 +92,7 @@ async def save_message(session_id: str, role: str, content: str) -> int:
             (session_id, role, content)
         )
         await db.commit()
+        log.debug("db.message_saved", session_id=session_id, role=role, message_id=cursor.lastrowid)
         return cursor.lastrowid
 
 
@@ -101,6 +128,7 @@ async def end_session(session_id: str):
             (session_id,)
         )
         await db.commit()
+    log.info("db.session_ended", session_id=session_id)
 
 
 async def cleanup_old_sessions(days: int = 7):
@@ -112,6 +140,7 @@ async def cleanup_old_sessions(days: int = 7):
             (cutoff_date,)
         )
         await db.commit()
+    log.info("db.cleanup_completed", days=days)
 
 
 async def mark_memories_consumed(message_id: int) -> None:
