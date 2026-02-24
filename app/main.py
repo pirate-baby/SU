@@ -29,7 +29,6 @@ from app.session_manager import (
 from app.claude_client import ClaudeChat
 from app.memory_manager import on_user_message, on_session_end
 from app.models import SessionCreateResponse
-from app.website_agent import subagent_event_queue
 from app.agent_registry import (
     get_or_create_agent,
     get_lock,
@@ -455,26 +454,6 @@ async def send_message_history(websocket: WebSocket, session_id: str):
         })
 
 
-async def _drain_subagent_events(websocket: WebSocket, stop: asyncio.Event):
-    """Forward subagent progress events to the websocket until stop is set."""
-    log.debug("drain.started")
-    while not stop.is_set():
-        try:
-            event = await asyncio.wait_for(subagent_event_queue.get(), timeout=0.25)
-            log.debug("drain.event", event_type=event.get("type"))
-            await websocket.send_json({
-                "type": "subagent_event",
-                "subtype": event.get("type"),
-                "data": event,
-            })
-        except asyncio.TimeoutError:
-            continue
-        except Exception:
-            log.exception("drain.error")
-            break
-    log.debug("drain.stopped")
-
-
 async def _forward_tts_audio(tts, websocket: WebSocket, session_id: str):
     """Read audio chunks from TTS and forward over the app WebSocket."""
     chunks_forwarded = 0
@@ -494,16 +473,6 @@ async def _forward_tts_audio(tts, websocket: WebSocket, session_id: str):
 async def stream_claude_response(websocket: WebSocket, session_id: str, user_message: str, claude: ClaudeChat, voice_mode: bool = False):
     await websocket.send_json({"type": "assistant_start"})
 
-    # Drain any stale events from a previous call
-    while not subagent_event_queue.empty():
-        try:
-            subagent_event_queue.get_nowait()
-        except asyncio.QueueEmpty:
-            break
-
-    stop_drain = asyncio.Event()
-    drain_task = asyncio.create_task(_drain_subagent_events(websocket, stop_drain))
-
     # Set up TTS if voice mode is active
     tts = None
     tts_forwarder = None
@@ -518,53 +487,49 @@ async def stream_claude_response(websocket: WebSocket, session_id: str, user_mes
             tts = None
 
     full_response = ""
-    try:
-        async for event in claude.send_message(user_message):
-            event_type = event["type"]
+    async for event in claude.send_message(user_message):
+        event_type = event["type"]
 
-            if event_type == "text":
-                full_response += event["content"]
-                await websocket.send_json({
-                    "type": "assistant_chunk",
-                    "content": event["content"]
-                })
-                if tts:
-                    await tts.send_text(event["content"])
-            elif event_type == "tool_use":
-                log.info(
-                    "chat.tool_use",
-                    session_id=session_id,
-                    tool_name=event["name"],
-                    tool_id=event["id"],
-                )
-                await websocket.send_json({
-                    "type": "tool_use",
-                    "id": event["id"],
-                    "name": event["name"],
-                    "input": event["input"],
-                })
-            elif event_type == "tool_result":
-                log.info(
-                    "chat.tool_result",
-                    session_id=session_id,
-                    tool_use_id=event["tool_use_id"],
-                    is_error=event["is_error"],
-                )
-                await websocket.send_json({
-                    "type": "tool_result",
-                    "tool_use_id": event["tool_use_id"],
-                    "content": event["content"],
-                    "is_error": event["is_error"],
-                })
-            elif event_type == "error":
-                log.error("chat.stream_error", session_id=session_id, content=event["content"])
-                await websocket.send_json({
-                    "type": "error",
-                    "content": event["content"]
-                })
-    finally:
-        stop_drain.set()
-        await drain_task
+        if event_type == "text":
+            full_response += event["content"]
+            await websocket.send_json({
+                "type": "assistant_chunk",
+                "content": event["content"]
+            })
+            if tts:
+                await tts.send_text(event["content"])
+        elif event_type == "tool_use":
+            log.info(
+                "chat.tool_use",
+                session_id=session_id,
+                tool_name=event["name"],
+                tool_id=event["id"],
+            )
+            await websocket.send_json({
+                "type": "tool_use",
+                "id": event["id"],
+                "name": event["name"],
+                "input": event["input"],
+            })
+        elif event_type == "tool_result":
+            log.info(
+                "chat.tool_result",
+                session_id=session_id,
+                tool_use_id=event["tool_use_id"],
+                is_error=event["is_error"],
+            )
+            await websocket.send_json({
+                "type": "tool_result",
+                "tool_use_id": event["tool_use_id"],
+                "content": event["content"],
+                "is_error": event["is_error"],
+            })
+        elif event_type == "error":
+            log.error("chat.stream_error", session_id=session_id, content=event["content"])
+            await websocket.send_json({
+                "type": "error",
+                "content": event["content"]
+            })
 
     # Finalize TTS
     if tts:

@@ -16,6 +16,7 @@ dependencies = [
     "httpx>=0.25.0",
     "sqlalchemy[asyncio]>=2.0.0",
     "pywebpush>=2.0.0",
+    "jsonschema>=4.20.0",
 ]
 
 [project.optional-dependencies]
