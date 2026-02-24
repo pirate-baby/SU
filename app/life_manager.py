@@ -5,8 +5,6 @@ tools so Claude can manage the master's schedule and tasks during conversation.
 Also used by background scheduler agents to read/write operational state.
 """
 import json
-import uuid
-from datetime import datetime
 from typing import Any
 
 import inspect
@@ -24,10 +22,20 @@ if "version" not in inspect.signature(_orig_server_init).parameters:
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
-from app.database import get_db
 from app.logger import get_logger
+from app.repositories import TaskRepo, EventRepo, InterjectionRepo
 
 log = get_logger(__name__)
+
+
+def _json_response(data: Any, is_error: bool = False) -> dict[str, Any]:
+    """Build an MCP-formatted tool response."""
+    result: dict[str, Any] = {
+        "content": [{"type": "text", "text": json.dumps(data, indent=2, default=str)}],
+    }
+    if is_error:
+        result["is_error"] = True
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -76,38 +84,19 @@ log = get_logger(__name__)
     },
 )
 async def create_task(args: dict[str, Any]) -> dict[str, Any]:
-    task_id = str(uuid.uuid4())
-    title = args["title"]
-    now = datetime.utcnow().isoformat()
-
-    async with get_db() as db:
-        await db.execute(
-            """INSERT INTO tasks
-               (id, title, description, priority, category, due_date, due_time,
-                source, source_ref, parent_task_id, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                task_id,
-                title,
-                args.get("description"),
-                args.get("priority", 3),
-                args.get("category"),
-                args.get("due_date"),
-                args.get("due_time"),
-                args.get("source", "manual"),
-                args.get("source_ref"),
-                args.get("parent_task_id"),
-                now,
-                now,
-            ),
-        )
-        await db.commit()
-
-    log.info("life_manager.task_created", task_id=task_id, title=title)
-    result = {"id": task_id, "title": title, "status": "pending", **{
-        k: args[k] for k in args if k != "title"
-    }}
-    return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
+    task = await TaskRepo.create(
+        title=args["title"],
+        description=args.get("description"),
+        priority=args.get("priority", 3),
+        category=args.get("category"),
+        due_date=args.get("due_date"),
+        due_time=args.get("due_time"),
+        source=args.get("source", "manual"),
+        source_ref=args.get("source_ref"),
+        parent_task_id=args.get("parent_task_id"),
+    )
+    log.info("life_manager.task_created", task_id=task.id, title=task.title)
+    return _json_response(task.model_dump(exclude_none=True))
 
 
 @tool(
@@ -133,35 +122,12 @@ async def create_task(args: dict[str, Any]) -> dict[str, Any]:
 )
 async def update_task(args: dict[str, Any]) -> dict[str, Any]:
     task_id = args["id"]
-    updatable = ["title", "description", "status", "priority", "category",
-                 "due_date", "due_time"]
-    sets = []
-    vals = []
-    for field in updatable:
-        if field in args:
-            sets.append(f"{field} = ?")
-            vals.append(args[field])
-
-    if not sets:
-        return {"content": [{"type": "text", "text": json.dumps({"error": "No fields to update"})}], "is_error": True}
-
-    # If marking done, set completed_at
-    if args.get("status") == "done":
-        sets.append("completed_at = ?")
-        vals.append(datetime.utcnow().isoformat())
-
-    sets.append("updated_at = ?")
-    vals.append(datetime.utcnow().isoformat())
-    vals.append(task_id)
-
-    async with get_db() as db:
-        await db.execute(
-            f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?", vals
-        )
-        await db.commit()
-
+    fields = {k: v for k, v in args.items() if k != "id"}
+    if not fields:
+        return _json_response({"error": "No fields to update"}, is_error=True)
+    await TaskRepo.update(task_id, **fields)
     log.info("life_manager.task_updated", task_id=task_id)
-    return {"content": [{"type": "text", "text": json.dumps({"updated": task_id})}]}
+    return _json_response({"updated": task_id})
 
 
 @tool(
@@ -189,36 +155,15 @@ async def update_task(args: dict[str, Any]) -> dict[str, Any]:
     },
 )
 async def list_tasks(args: dict[str, Any]) -> dict[str, Any]:
-    clauses: list[str] = []
-    params: list[Any] = []
-
-    if "status" in args:
-        clauses.append("status = ?")
-        params.append(args["status"])
-    if "category" in args:
-        clauses.append("category = ?")
-        params.append(args["category"])
-    if "due_before" in args:
-        clauses.append("due_date <= ?")
-        params.append(args["due_before"])
-    if "due_after" in args:
-        clauses.append("due_date >= ?")
-        params.append(args["due_after"])
-    if "priority" in args:
-        clauses.append("priority = ?")
-        params.append(args["priority"])
-
-    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-    limit = args.get("limit", 50)
-    query = f"SELECT * FROM tasks {where} ORDER BY priority ASC, due_date ASC LIMIT ?"
-    params.append(limit)
-
-    async with get_db() as db:
-        cursor = await db.execute(query, params)
-        rows = await cursor.fetchall()
-        tasks = [dict(row) for row in rows]
-
-    return {"content": [{"type": "text", "text": json.dumps(tasks, indent=2, default=str)}]}
+    tasks = await TaskRepo.list(
+        status=args.get("status"),
+        category=args.get("category"),
+        due_before=args.get("due_before"),
+        due_after=args.get("due_after"),
+        priority=args.get("priority"),
+        limit=args.get("limit", 50),
+    )
+    return _json_response(tasks)
 
 
 @tool(
@@ -234,17 +179,9 @@ async def list_tasks(args: dict[str, Any]) -> dict[str, Any]:
 )
 async def complete_task(args: dict[str, Any]) -> dict[str, Any]:
     task_id = args["id"]
-    now = datetime.utcnow().isoformat()
-
-    async with get_db() as db:
-        await db.execute(
-            "UPDATE tasks SET status = 'done', completed_at = ?, updated_at = ? WHERE id = ?",
-            (now, now, task_id),
-        )
-        await db.commit()
-
+    await TaskRepo.complete(task_id)
     log.info("life_manager.task_completed", task_id=task_id)
-    return {"content": [{"type": "text", "text": json.dumps({"completed": task_id})}]}
+    return _json_response({"completed": task_id})
 
 
 @tool(
@@ -260,13 +197,9 @@ async def complete_task(args: dict[str, Any]) -> dict[str, Any]:
 )
 async def delete_task(args: dict[str, Any]) -> dict[str, Any]:
     task_id = args["id"]
-
-    async with get_db() as db:
-        await db.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
-        await db.commit()
-
+    await TaskRepo.delete(task_id)
     log.info("life_manager.task_deleted", task_id=task_id)
-    return {"content": [{"type": "text", "text": json.dumps({"deleted": task_id})}]}
+    return _json_response({"deleted": task_id})
 
 
 # ---------------------------------------------------------------------------
@@ -302,36 +235,19 @@ async def delete_task(args: dict[str, Any]) -> dict[str, Any]:
     },
 )
 async def create_event(args: dict[str, Any]) -> dict[str, Any]:
-    event_id = str(uuid.uuid4())
-    now = datetime.utcnow().isoformat()
-
-    async with get_db() as db:
-        await db.execute(
-            """INSERT INTO events
-               (id, title, description, start_time, end_time, all_day,
-                location, source, source_ref, reminder_minutes,
-                created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                event_id,
-                args["title"],
-                args.get("description"),
-                args["start_time"],
-                args.get("end_time"),
-                1 if args.get("all_day") else 0,
-                args.get("location"),
-                args.get("source", "manual"),
-                args.get("source_ref"),
-                args.get("reminder_minutes", 30),
-                now,
-                now,
-            ),
-        )
-        await db.commit()
-
-    log.info("life_manager.event_created", event_id=event_id, title=args["title"])
-    result = {"id": event_id, "title": args["title"], "start_time": args["start_time"]}
-    return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
+    event = await EventRepo.create(
+        title=args["title"],
+        start_time=args["start_time"],
+        end_time=args.get("end_time"),
+        description=args.get("description"),
+        all_day=args.get("all_day", False),
+        location=args.get("location"),
+        reminder_minutes=args.get("reminder_minutes", 30),
+        source=args.get("source", "manual"),
+        source_ref=args.get("source_ref"),
+    )
+    log.info("life_manager.event_created", event_id=event.id, title=event.title)
+    return _json_response(event.model_dump(exclude_none=True))
 
 
 @tool(
@@ -354,33 +270,12 @@ async def create_event(args: dict[str, Any]) -> dict[str, Any]:
 )
 async def update_event(args: dict[str, Any]) -> dict[str, Any]:
     event_id = args["id"]
-    updatable = ["title", "description", "start_time", "end_time", "all_day",
-                 "location", "reminder_minutes"]
-    sets = []
-    vals = []
-    for field in updatable:
-        if field in args:
-            val = args[field]
-            if field == "all_day":
-                val = 1 if val else 0
-            sets.append(f"{field} = ?")
-            vals.append(val)
-
-    if not sets:
-        return {"content": [{"type": "text", "text": json.dumps({"error": "No fields to update"})}], "is_error": True}
-
-    sets.append("updated_at = ?")
-    vals.append(datetime.utcnow().isoformat())
-    vals.append(event_id)
-
-    async with get_db() as db:
-        await db.execute(
-            f"UPDATE events SET {', '.join(sets)} WHERE id = ?", vals
-        )
-        await db.commit()
-
+    fields = {k: v for k, v in args.items() if k != "id"}
+    if not fields:
+        return _json_response({"error": "No fields to update"}, is_error=True)
+    await EventRepo.update(event_id, **fields)
     log.info("life_manager.event_updated", event_id=event_id)
-    return {"content": [{"type": "text", "text": json.dumps({"updated": event_id})}]}
+    return _json_response({"updated": event_id})
 
 
 @tool(
@@ -402,27 +297,12 @@ async def update_event(args: dict[str, Any]) -> dict[str, Any]:
     },
 )
 async def list_events(args: dict[str, Any]) -> dict[str, Any]:
-    clauses: list[str] = []
-    params: list[Any] = []
-
-    if "start_after" in args:
-        clauses.append("start_time >= ?")
-        params.append(args["start_after"])
-    if "start_before" in args:
-        clauses.append("start_time <= ?")
-        params.append(args["start_before"])
-
-    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-    limit = args.get("limit", 50)
-    query = f"SELECT * FROM events {where} ORDER BY start_time ASC LIMIT ?"
-    params.append(limit)
-
-    async with get_db() as db:
-        cursor = await db.execute(query, params)
-        rows = await cursor.fetchall()
-        events = [dict(row) for row in rows]
-
-    return {"content": [{"type": "text", "text": json.dumps(events, indent=2, default=str)}]}
+    events = await EventRepo.list(
+        start_after=args.get("start_after"),
+        start_before=args.get("start_before"),
+        limit=args.get("limit", 50),
+    )
+    return _json_response(events)
 
 
 @tool(
@@ -438,13 +318,9 @@ async def list_events(args: dict[str, Any]) -> dict[str, Any]:
 )
 async def delete_event(args: dict[str, Any]) -> dict[str, Any]:
     event_id = args["id"]
-
-    async with get_db() as db:
-        await db.execute("DELETE FROM events WHERE id = ?", (event_id,))
-        await db.commit()
-
+    await EventRepo.delete(event_id)
     log.info("life_manager.event_deleted", event_id=event_id)
-    return {"content": [{"type": "text", "text": json.dumps({"deleted": event_id})}]}
+    return _json_response({"deleted": event_id})
 
 
 # ---------------------------------------------------------------------------
@@ -478,30 +354,16 @@ async def delete_event(args: dict[str, Any]) -> dict[str, Any]:
     },
 )
 async def create_interjection(args: dict[str, Any]) -> dict[str, Any]:
-    interjection_id = str(uuid.uuid4())
-    now = datetime.utcnow().isoformat()
-
-    async with get_db() as db:
-        await db.execute(
-            """INSERT INTO interjections
-               (id, content, urgency, source, related_task_id, related_event_id,
-                status, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)""",
-            (
-                interjection_id,
-                args["content"],
-                args.get("urgency", "normal"),
-                args.get("source"),
-                args.get("related_task_id"),
-                args.get("related_event_id"),
-                now,
-            ),
-        )
-        await db.commit()
-
-    log.info("life_manager.interjection_created", id=interjection_id,
-             urgency=args.get("urgency", "normal"), source=args.get("source"))
-    return {"content": [{"type": "text", "text": json.dumps({"id": interjection_id, "status": "pending"})}]}
+    interjection = await InterjectionRepo.create(
+        content=args["content"],
+        urgency=args.get("urgency", "normal"),
+        source=args.get("source"),
+        related_task_id=args.get("related_task_id"),
+        related_event_id=args.get("related_event_id"),
+    )
+    log.info("life_manager.interjection_created", id=interjection.id,
+             urgency=interjection.urgency, source=interjection.source)
+    return _json_response({"id": interjection.id, "status": "pending"})
 
 
 @tool(
@@ -519,24 +381,11 @@ async def create_interjection(args: dict[str, Any]) -> dict[str, Any]:
     },
 )
 async def list_interjections(args: dict[str, Any]) -> dict[str, Any]:
-    clauses: list[str] = []
-    params: list[Any] = []
-
-    if "status" in args:
-        clauses.append("status = ?")
-        params.append(args["status"])
-
-    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-    limit = args.get("limit", 20)
-    query = f"SELECT * FROM interjections {where} ORDER BY created_at DESC LIMIT ?"
-    params.append(limit)
-
-    async with get_db() as db:
-        cursor = await db.execute(query, params)
-        rows = await cursor.fetchall()
-        items = [dict(row) for row in rows]
-
-    return {"content": [{"type": "text", "text": json.dumps(items, indent=2, default=str)}]}
+    items = await InterjectionRepo.list(
+        status=args.get("status"),
+        limit=args.get("limit", 20),
+    )
+    return _json_response(items)
 
 
 # ---------------------------------------------------------------------------

@@ -3,8 +3,6 @@ FastAPI application with Claude chat functionality and life management.
 """
 import asyncio
 import json
-import uuid
-from datetime import datetime
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
@@ -39,6 +37,7 @@ from app.agent_registry import (
     cleanup_idle_agents,
 )
 from app.scheduler import scheduler
+from app.repositories import TaskRepo, EventRepo, InterjectionRepo
 
 log = get_logger(__name__)
 
@@ -69,30 +68,20 @@ async def push_interjection_to_clients(interjection: dict[str, Any]) -> None:
 
 async def deliver_pending_interjections(websocket: WebSocket) -> None:
     """Deliver any pending interjections when a client connects."""
-    async with get_db() as db:
-        cursor = await db.execute(
-            "SELECT * FROM interjections WHERE status = 'pending' ORDER BY created_at ASC"
-        )
-        rows = await cursor.fetchall()
-        now = datetime.utcnow().isoformat()
-        for row in rows:
-            item = dict(row)
-            try:
-                await websocket.send_json({
-                    "type": "interjection",
-                    "id": item["id"],
-                    "content": item["content"],
-                    "urgency": item.get("urgency", "normal"),
-                    "source": item.get("source"),
-                    "created_at": item.get("created_at"),
-                })
-                await db.execute(
-                    "UPDATE interjections SET status = 'delivered', delivered_at = ? WHERE id = ?",
-                    (now, item["id"]),
-                )
-            except Exception:
-                break
-        await db.commit()
+    items = await InterjectionRepo.pending()
+    for item in items:
+        try:
+            await websocket.send_json({
+                "type": "interjection",
+                "id": item["id"],
+                "content": item["content"],
+                "urgency": item.get("urgency", "normal"),
+                "source": item.get("source"),
+                "created_at": item.get("created_at"),
+            })
+            await InterjectionRepo.mark_delivered(item["id"])
+        except Exception:
+            break
 
 
 @asynccontextmanager
@@ -304,80 +293,34 @@ async def api_list_tasks(
     priority: int | None = None,
     limit: int = 50,
 ):
-    clauses: list[str] = []
-    params: list[Any] = []
-    if status:
-        clauses.append("status = ?")
-        params.append(status)
-    if category:
-        clauses.append("category = ?")
-        params.append(category)
-    if due_before:
-        clauses.append("due_date <= ?")
-        params.append(due_before)
-    if due_after:
-        clauses.append("due_date >= ?")
-        params.append(due_after)
-    if priority is not None:
-        clauses.append("priority = ?")
-        params.append(priority)
-    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-    params.append(limit)
-
-    async with get_db() as db:
-        cursor = await db.execute(
-            f"SELECT * FROM tasks {where} ORDER BY priority ASC, due_date ASC LIMIT ?",
-            params,
-        )
-        return [dict(row) for row in await cursor.fetchall()]
+    return await TaskRepo.list(
+        status=status, category=category, due_before=due_before,
+        due_after=due_after, priority=priority, limit=limit,
+    )
 
 
 @app.post("/api/tasks", status_code=201)
 async def api_create_task(body: TaskCreate):
-    task_id = str(uuid.uuid4())
-    now = datetime.utcnow().isoformat()
-    async with get_db() as db:
-        await db.execute(
-            """INSERT INTO tasks
-               (id, title, description, priority, category, due_date, due_time,
-                created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (task_id, body.title, body.description, body.priority,
-             body.category, body.due_date, body.due_time, now, now),
-        )
-        await db.commit()
-    return {"id": task_id, "title": body.title, "status": "pending"}
+    task = await TaskRepo.create(
+        title=body.title, description=body.description,
+        priority=body.priority, category=body.category,
+        due_date=body.due_date, due_time=body.due_time,
+    )
+    return {"id": task.id, "title": task.title, "status": "pending"}
 
 
 @app.put("/api/tasks/{task_id}")
 async def api_update_task(task_id: str, body: TaskUpdate):
-    sets: list[str] = []
-    vals: list[Any] = []
-    for field in ["title", "description", "status", "priority", "category",
-                  "due_date", "due_time"]:
-        val = getattr(body, field, None)
-        if val is not None:
-            sets.append(f"{field} = ?")
-            vals.append(val)
-    if not sets:
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not fields:
         raise HTTPException(400, "No fields to update")
-    if body.status == "done":
-        sets.append("completed_at = ?")
-        vals.append(datetime.utcnow().isoformat())
-    sets.append("updated_at = ?")
-    vals.append(datetime.utcnow().isoformat())
-    vals.append(task_id)
-    async with get_db() as db:
-        await db.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?", vals)
-        await db.commit()
+    await TaskRepo.update(task_id, **fields)
     return {"updated": task_id}
 
 
 @app.delete("/api/tasks/{task_id}")
 async def api_delete_task(task_id: str):
-    async with get_db() as db:
-        await db.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
-        await db.commit()
+    await TaskRepo.delete(task_id)
     return {"deleted": task_id}
 
 
@@ -408,70 +351,34 @@ async def api_list_events(
     start_before: str | None = None,
     limit: int = 50,
 ):
-    clauses: list[str] = []
-    params: list[Any] = []
-    if start_after:
-        clauses.append("start_time >= ?")
-        params.append(start_after)
-    if start_before:
-        clauses.append("start_time <= ?")
-        params.append(start_before)
-    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-    params.append(limit)
-    async with get_db() as db:
-        cursor = await db.execute(
-            f"SELECT * FROM events {where} ORDER BY start_time ASC LIMIT ?",
-            params,
-        )
-        return [dict(row) for row in await cursor.fetchall()]
+    return await EventRepo.list(
+        start_after=start_after, start_before=start_before, limit=limit,
+    )
 
 
 @app.post("/api/events", status_code=201)
 async def api_create_event(body: EventCreate):
-    event_id = str(uuid.uuid4())
-    now = datetime.utcnow().isoformat()
-    async with get_db() as db:
-        await db.execute(
-            """INSERT INTO events
-               (id, title, description, start_time, end_time, all_day,
-                location, reminder_minutes, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (event_id, body.title, body.description, body.start_time,
-             body.end_time, 1 if body.all_day else 0, body.location,
-             body.reminder_minutes, now, now),
-        )
-        await db.commit()
-    return {"id": event_id, "title": body.title}
+    event = await EventRepo.create(
+        title=body.title, start_time=body.start_time,
+        end_time=body.end_time, description=body.description,
+        all_day=body.all_day, location=body.location,
+        reminder_minutes=body.reminder_minutes,
+    )
+    return {"id": event.id, "title": event.title}
 
 
 @app.put("/api/events/{event_id}")
 async def api_update_event(event_id: str, body: EventUpdate):
-    sets: list[str] = []
-    vals: list[Any] = []
-    for field in ["title", "description", "start_time", "end_time",
-                  "all_day", "location", "reminder_minutes"]:
-        val = getattr(body, field, None)
-        if val is not None:
-            if field == "all_day":
-                val = 1 if val else 0
-            sets.append(f"{field} = ?")
-            vals.append(val)
-    if not sets:
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not fields:
         raise HTTPException(400, "No fields to update")
-    sets.append("updated_at = ?")
-    vals.append(datetime.utcnow().isoformat())
-    vals.append(event_id)
-    async with get_db() as db:
-        await db.execute(f"UPDATE events SET {', '.join(sets)} WHERE id = ?", vals)
-        await db.commit()
+    await EventRepo.update(event_id, **fields)
     return {"updated": event_id}
 
 
 @app.delete("/api/events/{event_id}")
 async def api_delete_event(event_id: str):
-    async with get_db() as db:
-        await db.execute("DELETE FROM events WHERE id = ?", (event_id,))
-        await db.commit()
+    await EventRepo.delete(event_id)
     return {"deleted": event_id}
 
 
@@ -479,22 +386,12 @@ async def api_delete_event(event_id: str):
 
 @app.get("/api/interjections")
 async def api_list_interjections(status: str = "pending", limit: int = 20):
-    async with get_db() as db:
-        cursor = await db.execute(
-            "SELECT * FROM interjections WHERE status = ? ORDER BY created_at DESC LIMIT ?",
-            (status, limit),
-        )
-        return [dict(row) for row in await cursor.fetchall()]
+    return await InterjectionRepo.list(status=status, limit=limit)
 
 
 @app.post("/api/interjections/{interjection_id}/dismiss")
 async def api_dismiss_interjection(interjection_id: str):
-    async with get_db() as db:
-        await db.execute(
-            "UPDATE interjections SET status = 'dismissed' WHERE id = ?",
-            (interjection_id,),
-        )
-        await db.commit()
+    await InterjectionRepo.dismiss(interjection_id)
     return {"dismissed": interjection_id}
 
 
