@@ -40,6 +40,58 @@ class RestartHandler(BaseHTTPRequestHandler):
                 stdout=sys.stdout,
                 stderr=sys.stderr,
             )
+        elif self.path == "/update":
+            # Pull latest main, push to main, then rebuild the container.
+            # Runs on the host so git credentials and ssh keys are available.
+            print(f"[restart_server] Running update in {REPO_DIR}...")
+            try:
+                # git pull --rebase origin main
+                pull = subprocess.run(
+                    ["git", "pull", "--rebase", "origin", "main"],
+                    cwd=REPO_DIR,
+                    capture_output=True,
+                    text=True,
+                )
+                print(f"[restart_server] git pull: {pull.stdout.strip()} {pull.stderr.strip()}")
+                if pull.returncode != 0:
+                    raise RuntimeError(f"git pull failed: {pull.stderr.strip()}")
+
+                # git push origin main
+                push = subprocess.run(
+                    ["git", "push", "origin", "main"],
+                    cwd=REPO_DIR,
+                    capture_output=True,
+                    text=True,
+                )
+                print(f"[restart_server] git push: {push.stdout.strip()} {push.stderr.strip()}")
+                if push.returncode != 0:
+                    raise RuntimeError(f"git push failed: {push.stderr.strip()}")
+
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain")
+                self.end_headers()
+                self.wfile.write(b"Update initiated — rebuilding container\n")
+                self.wfile.flush()
+            except Exception as exc:
+                self.send_response(500)
+                self.send_header("Content-Type", "text/plain")
+                self.end_headers()
+                self.wfile.write(f"Update failed: {exc}\n".encode())
+                self.wfile.flush()
+                return
+
+            # Rebuild and restart the container after a successful git update.
+            subprocess.Popen(
+                [
+                    "docker", "compose",
+                    "-f", "docker-compose.yml",
+                    "-f", "docker-compose.local.yml",
+                    "up", "--build", "-d", "claude-executor",
+                ],
+                cwd=REPO_DIR,
+                stdout=sys.stdout,
+                stderr=sys.stderr,
+            )
         else:
             self.send_response(404)
             self.end_headers()

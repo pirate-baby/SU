@@ -689,6 +689,24 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
         _active_connections.pop(session_id, None)
 
 
+@app.post("/api/admin/update")
+async def admin_update():
+    """Pull latest main, push to origin, then rebuild the container.
+
+    Proxies to the host-side restart server (port 8932) which has access
+    to git credentials and docker compose.
+    """
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            resp = await client.post("http://host.docker.internal:8932/update")
+        except httpx.RequestError as exc:
+            raise HTTPException(status_code=503, detail=f"Restart server unreachable: {exc}")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=resp.text)
+    log.info("admin.update_triggered")
+    return {"status": "update initiated"}
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""

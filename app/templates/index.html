@@ -20,6 +20,10 @@
             <p style="margin-top: 24px;"><a href="/planner">Planner</a></p>
             <p style="margin-top: 8px;"><a href="/sessions">Session Logs</a></p>
             <p style="margin-top: 8px;"><a id="vibe-kanban-link" href="#" target="_blank">Vibe Kanban</a></p>
+            <p style="margin-top: 24px;">
+                <button id="update-btn" class="primary-btn" style="font-size:0.8rem;padding:6px 16px;text-transform:none;letter-spacing:0;">Update &amp; Restart</button>
+                <span id="update-status" style="margin-left:10px;font-size:0.8rem;color:#888;"></span>
+            </p>
         </div>
     </div>
 
@@ -46,6 +50,33 @@
             } catch (error) {
                 console.error('Error creating session:', error);
                 alert('Error creating session');
+            }
+        });
+    </script>
+    <script>
+        document.getElementById('update-btn').addEventListener('click', async () => {
+            const btn = document.getElementById('update-btn');
+            const status = document.getElementById('update-status');
+            btn.disabled = true;
+            status.textContent = 'Pulling & pushing…';
+            status.style.color = '#888';
+            try {
+                const resp = await fetch('/api/admin/update', { method: 'POST' });
+                if (resp.ok) {
+                    status.textContent = 'Restarting — page will reload shortly…';
+                    status.style.color = '#4caf50';
+                    // Give the container ~15 s to rebuild, then reload.
+                    setTimeout(() => location.reload(), 15000);
+                } else {
+                    const text = await resp.text();
+                    status.textContent = `Failed: ${text}`;
+                    status.style.color = '#f44336';
+                    btn.disabled = false;
+                }
+            } catch (err) {
+                status.textContent = `Error: ${err}`;
+                status.style.color = '#f44336';
+                btn.disabled = false;
             }
         });
     </script>
