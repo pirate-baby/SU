@@ -366,6 +366,16 @@ body {
     z-index: 2;
 }
 
+/* Tasks rendered on calendar grid — distinct from events */
+.cal-task {
+    background: rgba(51, 153, 255, 0.08);
+    border-left-color: var(--blue);
+    color: var(--blue);
+}
+.cal-task:hover {
+    background: rgba(51, 153, 255, 0.15);
+}
+
 /* Modals */
 .modal-overlay {
     position: fixed;

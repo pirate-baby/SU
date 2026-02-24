@@ -80,6 +80,7 @@
         const res = await fetch('/api/tasks?' + params);
         tasks = await res.json();
         renderTasks();
+        renderCalendar();
     }
 
     async function fetchEvents() {
@@ -255,6 +256,34 @@
                 openEventModal(ev.id);
             });
             cell.appendChild(eventEl);
+        }
+
+        // Place tasks with due_date + due_time on the grid
+        for (const t of tasks) {
+            if (!t.due_date || !t.due_time || t.status === 'done') continue;
+            const start = new Date(`${t.due_date}T${t.due_time}`);
+            const dayIdx = days.findIndex(d => isSameDay(d, start));
+            if (dayIdx === -1) continue;
+
+            const hour = start.getHours();
+            const minutes = start.getMinutes();
+            const topOffset = (minutes / 60) * 48;
+
+            const cellSelector = `.cal-cell[data-date="${days[dayIdx].toISOString().split('T')[0]}"][data-hour="${hour}"]`;
+            const cell = calGrid.querySelector(cellSelector);
+            if (!cell) continue;
+
+            const taskEl = document.createElement('div');
+            taskEl.className = 'cal-event cal-task';
+            taskEl.style.top = topOffset + 'px';
+            taskEl.style.height = '20px';
+            taskEl.textContent = t.title;
+            taskEl.dataset.id = t.id;
+            taskEl.addEventListener('click', (e) => {
+                e.stopPropagation();
+                openTaskModal(t.id);
+            });
+            cell.appendChild(taskEl);
         }
 
         // Cell click → new event at that time
