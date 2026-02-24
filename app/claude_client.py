@@ -6,6 +6,7 @@ to delegate complex work and keep the main conversation context clean. Playwrigh
 browsing is available directly via MCP, and dangerous websites are accessed through
 the scary_internet sandboxed subagent.
 """
+import os
 from typing import Any, AsyncGenerator, Optional
 from claude_agent_sdk import (
     ClaudeSDKClient,
@@ -136,7 +137,10 @@ class ClaudeChat:
     tool to keep the main conversation context clean.
     """
 
-    def __init__(self):
+    def __init__(self, oauth_token: Optional[str] = None):
+        if oauth_token:
+            os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = oauth_token
+
         self.options = self._build_options()
         self._client: Optional[ClaudeSDKClient] = None
 

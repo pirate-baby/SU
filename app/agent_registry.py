@@ -10,6 +10,7 @@ from typing import Optional
 from fastapi import WebSocket
 
 from app.claude_client import ClaudeChat
+from app.config import settings
 from app.logger import get_logger
 from app.process_limiter import _get_semaphore, claude_process_slot
 from app.session_manager import get_session
@@ -41,7 +42,8 @@ async def get_or_create_agent(session_id: str) -> ClaudeChat:
     sem = _get_semaphore()
     await sem.acquire()
     try:
-        claude = ClaudeChat()
+        oauth = settings.claude_code_oauth_token or None
+        claude = ClaudeChat(oauth_token=oauth)
         await claude.connect()
     except BaseException:
         sem.release()

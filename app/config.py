@@ -8,6 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
+    claude_code_oauth_token: Optional[str] = None
     self_iteration_mode: bool = False
 
     # Playwright MCP Bridge (optional — chat works without it)

@@ -4,16 +4,13 @@ FROM python:3.12-slim
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies (curl for healthcheck, nodejs for claude binary, git for self-iteration)
+# Install system dependencies (curl for healthcheck, nodejs for claude runtime, git for self-iteration)
+# Note: claude-agent-sdk bundles its own claude binary, but needs nodejs as runtime
 RUN apt-get update && apt-get install -y \
     curl \
     git \
     nodejs \
-    npm \
     && rm -rf /var/lib/apt/lists/*
-
-# Install Claude Code CLI globally using npx
-RUN npm install -g @anthropic-ai/claude-code
 
 # Copy UV from official image (no pip needed!)
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
