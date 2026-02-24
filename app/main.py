@@ -470,8 +470,17 @@ async def _forward_tts_audio(tts, websocket: WebSocket, session_id: str):
     await websocket.send_json({"type": "audio_end"})
 
 
+async def _ws_send(websocket: WebSocket, data: dict) -> bool:
+    """Send JSON over websocket, returning False if the connection is closed."""
+    try:
+        await websocket.send_json(data)
+        return True
+    except Exception:
+        return False
+
+
 async def stream_claude_response(websocket: WebSocket, session_id: str, user_message: str, claude: ClaudeChat, voice_mode: bool = False):
-    await websocket.send_json({"type": "assistant_start"})
+    ws_live = await _ws_send(websocket, {"type": "assistant_start"})
 
     # Set up TTS if voice mode is active
     tts = None
@@ -492,10 +501,11 @@ async def stream_claude_response(websocket: WebSocket, session_id: str, user_mes
 
         if event_type == "text":
             full_response += event["content"]
-            await websocket.send_json({
-                "type": "assistant_chunk",
-                "content": event["content"]
-            })
+            if ws_live:
+                ws_live = await _ws_send(websocket, {
+                    "type": "assistant_chunk",
+                    "content": event["content"]
+                })
             if tts:
                 await tts.send_text(event["content"])
         elif event_type == "tool_use":
@@ -505,12 +515,13 @@ async def stream_claude_response(websocket: WebSocket, session_id: str, user_mes
                 tool_name=event["name"],
                 tool_id=event["id"],
             )
-            await websocket.send_json({
-                "type": "tool_use",
-                "id": event["id"],
-                "name": event["name"],
-                "input": event["input"],
-            })
+            if ws_live:
+                ws_live = await _ws_send(websocket, {
+                    "type": "tool_use",
+                    "id": event["id"],
+                    "name": event["name"],
+                    "input": event["input"],
+                })
         elif event_type == "tool_result":
             log.info(
                 "chat.tool_result",
@@ -518,18 +529,20 @@ async def stream_claude_response(websocket: WebSocket, session_id: str, user_mes
                 tool_use_id=event["tool_use_id"],
                 is_error=event["is_error"],
             )
-            await websocket.send_json({
-                "type": "tool_result",
-                "tool_use_id": event["tool_use_id"],
-                "content": event["content"],
-                "is_error": event["is_error"],
-            })
+            if ws_live:
+                ws_live = await _ws_send(websocket, {
+                    "type": "tool_result",
+                    "tool_use_id": event["tool_use_id"],
+                    "content": event["content"],
+                    "is_error": event["is_error"],
+                })
         elif event_type == "error":
             log.error("chat.stream_error", session_id=session_id, content=event["content"])
-            await websocket.send_json({
-                "type": "error",
-                "content": event["content"]
-            })
+            if ws_live:
+                ws_live = await _ws_send(websocket, {
+                    "type": "error",
+                    "content": event["content"]
+                })
 
     # Finalize TTS
     if tts:
@@ -541,9 +554,13 @@ async def stream_claude_response(websocket: WebSocket, session_id: str, user_mes
         if tts_forwarder:
             await tts_forwarder
 
+    # Always persist the response, even if the websocket disconnected mid-stream
     await save_message(session_id, "assistant", full_response)
     log.info("chat.assistant_response", session_id=session_id, length=len(full_response))
-    await websocket.send_json({"type": "assistant_end"})
+    if ws_live:
+        await _ws_send(websocket, {"type": "assistant_end"})
+    else:
+        log.warning("chat.ws_disconnected_during_stream", session_id=session_id)
 
 
 async def _inject_pending_memories(session_id: str, claude: ClaudeChat) -> None:
@@ -586,7 +603,7 @@ async def handle_user_message(websocket: WebSocket, session_id: str, user_messag
         await stream_claude_response(websocket, session_id, user_message, claude, voice_mode=voice_mode)
     except Exception as e:
         log.exception("chat.handle_error", session_id=session_id, error=str(e))
-        await websocket.send_json({
+        await _ws_send(websocket, {
             "type": "error",
             "content": f"Error generating response: {str(e)}"
         })
