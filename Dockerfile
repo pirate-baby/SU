@@ -4,9 +4,10 @@ FROM python:3.12-slim
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies (curl for healthcheck, nodejs for claude binary)
+# Install system dependencies (curl for healthcheck, nodejs for claude binary, git for self-iteration)
 RUN apt-get update && apt-get install -y \
     curl \
+    git \
     nodejs \
     npm \
     && rm -rf /var/lib/apt/lists/*
@@ -35,7 +36,13 @@ RUN useradd -m -u 501 appuser && \
     mkdir -p /home/appuser/basic-memory && \
     chown appuser:appuser /home/appuser/basic-memory && \
     mkdir -p /data && \
-    chown appuser:appuser /data
+    chown appuser:appuser /data && \
+    mkdir -p /src && \
+    chown appuser:appuser /src
+
+# Configure git identity for self-iteration commits
+RUN git config --global user.email "su@localhost" && \
+    git config --global user.name "SU"
 
 # Switch to non-root user
 USER appuser

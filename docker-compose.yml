@@ -11,6 +11,7 @@ services:
       - ${CLAUDE_WORKDIR:-./claude-workspace}:/workspace
       - basic-memory-data:/home/appuser/basic-memory
       - session-data:/data
+      - .:/src
     environment:
       - PYTHONUNBUFFERED=1
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
@@ -18,6 +19,7 @@ services:
       - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
       - ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID:-}
       - ELEVENLABS_TTS_MODEL=${ELEVENLABS_TTS_MODEL:-eleven_flash_v2_5}
+      - SELF_ITERATION_MODE=${SELF_ITERATION_MODE:-false}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped

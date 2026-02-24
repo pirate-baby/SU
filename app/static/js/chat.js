@@ -1,7 +1,8 @@
 let ws = null;
 let reconnectAttempts = 0;
-const MAX_RECONNECT_ATTEMPTS = 5;
+const MAX_RECONNECT_ATTEMPTS = 60;
 const RECONNECT_DELAY = 2000;
+const MAX_RECONNECT_DELAY = 10000;
 
 const messagesContainer = document.getElementById('messages');
 const messageInput = document.getElementById('message-input');
@@ -64,10 +65,12 @@ function connect() {
 
         if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
             reconnectAttempts++;
+            const delay = Math.min(RECONNECT_DELAY * reconnectAttempts, MAX_RECONNECT_DELAY);
+            setStatus(`Reconnecting in ${Math.round(delay/1000)}s... (attempt ${reconnectAttempts})`, 'warning');
             setTimeout(() => {
                 console.log(`Reconnecting... (attempt ${reconnectAttempts})`);
                 connect();
-            }, RECONNECT_DELAY * reconnectAttempts);
+            }, delay);
         } else {
             setStatus('Connection lost. Please refresh the page.', 'error');
         }
@@ -121,6 +124,11 @@ function handleMessage(data) {
         case 'error':
             appendMessage('system', `Error: ${data.content}`, true);
             enableInput();
+            break;
+
+        case 'restarting':
+            setStatus('Restarting with new code...', 'warning');
+            appendMessage('system', 'SU is restarting to apply code changes. The session will resume automatically.', false);
             break;
 
         case 'status':

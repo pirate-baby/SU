@@ -26,6 +26,13 @@ from app.claude_client import ClaudeChat
 from app.memory_manager import on_user_message, on_session_end
 from app.models import SessionCreateResponse
 from app.website_agent import subagent_event_queue
+from app.agent_registry import (
+    get_or_create_agent,
+    get_lock,
+    touch,
+    release_agent,
+    cleanup_idle_agents,
+)
 
 log = get_logger(__name__)
 
@@ -35,9 +42,11 @@ async def lifespan(app: FastAPI):
     """Initialize database and log writer on startup."""
     await init_database()
     await start_log_writer()
+    cleanup_task = asyncio.create_task(cleanup_idle_agents())
     log.info("app.startup", version="2.0.0")
     yield
     log.info("app.shutdown")
+    cleanup_task.cancel()
     await stop_log_writer()
 
 
@@ -87,6 +96,7 @@ async def end_chat_session(session_id: str):
         raise HTTPException(status_code=404, detail="Session not found")
 
     await end_session(session_id)
+    await release_agent(session_id)
     log.info("session.ended", session_id=session_id)
     asyncio.ensure_future(on_session_end(session_id))
     return {"status": "ended"}
@@ -388,7 +398,11 @@ async def handle_user_message(websocket: WebSocket, session_id: str, user_messag
 
 @app.websocket("/ws/chat/{session_id}")
 async def websocket_chat(websocket: WebSocket, session_id: str):
-    """WebSocket endpoint for chat."""
+    """WebSocket endpoint for chat.
+
+    The agent lives in the agent_registry and survives WebSocket disconnects.
+    Each WS connection simply attaches to the existing (or newly-created) agent.
+    """
     log.info("ws.connect_attempt", session_id=session_id)
 
     try:
@@ -411,10 +425,7 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
     await update_session_activity(session_id)
 
     try:
-        if settings.claude_code_oauth_token:
-            claude = ClaudeChat(oauth_token=settings.claude_code_oauth_token)
-        else:
-            claude = ClaudeChat()
+        claude = await get_or_create_agent(session_id)
         log.info("ws.claude_initialized", session_id=session_id)
     except Exception as e:
         log.exception("ws.claude_init_failed", session_id=session_id, error=str(e))
@@ -426,23 +437,25 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
         return
 
     try:
-        async with claude:
-            while True:
-                data = await websocket.receive_text()
-                message_data = json.loads(data)
+        while True:
+            data = await websocket.receive_text()
+            message_data = json.loads(data)
 
-                msg_type = message_data.get("type")
-                if msg_type == "user_message":
-                    user_message = message_data.get("content", "").strip()
-                    if user_message:
-                        await handle_user_message(websocket, session_id, user_message, claude)
-                elif msg_type == "voice_message":
-                    user_message = message_data.get("content", "").strip()
-                    if user_message:
-                        await handle_user_message(websocket, session_id, user_message, claude, voice_mode=True)
+            msg_type = message_data.get("type")
+            if msg_type == "user_message":
+                user_message = message_data.get("content", "").strip()
+                if user_message:
+                    touch(session_id)
+                    await handle_user_message(websocket, session_id, user_message, claude)
+            elif msg_type == "voice_message":
+                user_message = message_data.get("content", "").strip()
+                if user_message:
+                    touch(session_id)
+                    await handle_user_message(websocket, session_id, user_message, claude, voice_mode=True)
 
     except WebSocketDisconnect:
         log.info("ws.disconnected", session_id=session_id)
+        # Agent stays alive in the registry — will be reused on reconnect
     except Exception as e:
         log.exception("ws.error", session_id=session_id, error=str(e))
         try:

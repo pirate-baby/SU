@@ -90,18 +90,44 @@ if ! kill -0 "$PLAYWRIGHT_PID" 2>/dev/null; then
 fi
 echo "Playwright MCP server started (PID $PLAYWRIGHT_PID)"
 
-# Ensure the Playwright MCP server is stopped when this script exits
+# ---------------------------------------------------------------------------
+# Restart server (runs on HOST so the container can trigger its own rebuild)
+# ---------------------------------------------------------------------------
+# Kill any existing restart server on port 8932
+if lsof -ti :8932 >/dev/null 2>&1; then
+    echo "Stopping existing restart server on port 8932..."
+    lsof -ti :8932 | xargs kill -9 2>/dev/null || true
+    sleep 1
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+echo "Starting restart server on host (port 8932)..."
+SU_REPO_DIR="$SCRIPT_DIR" python3 "$SCRIPT_DIR/restart_server.py" &
+RESTART_PID=$!
+
+sleep 1
+if ! kill -0 "$RESTART_PID" 2>/dev/null; then
+    echo "Error: Restart server failed to start."
+    exit 1
+fi
+echo "Restart server started (PID $RESTART_PID)"
+
+# Ensure background servers are stopped when this script exits
 cleanup() {
     echo ""
-    echo "Shutting down Playwright MCP server..."
-    # Kill whatever process is listening on port 8931 (npx may have forked,
-    # so the original $PLAYWRIGHT_PID may no longer be the actual server).
+    echo "Shutting down background servers..."
+    # Stop Playwright MCP
     if lsof -ti :8931 >/dev/null 2>&1; then
         lsof -ti :8931 | xargs kill 2>/dev/null || true
     fi
-    # Also try the original PID in case lsof didn't find it
     kill "$PLAYWRIGHT_PID" 2>/dev/null || true
     wait "$PLAYWRIGHT_PID" 2>/dev/null || true
+    # Stop restart server
+    if lsof -ti :8932 >/dev/null 2>&1; then
+        lsof -ti :8932 | xargs kill 2>/dev/null || true
+    fi
+    kill "$RESTART_PID" 2>/dev/null || true
+    wait "$RESTART_PID" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
@@ -118,9 +144,11 @@ echo "Services started successfully!"
 echo ""
 echo "Access the chat at: http://localhost"
 echo "Playwright MCP server running on: http://localhost:8931/sse"
+echo "Restart server running on: http://localhost:8932/health"
 echo ""
+echo "To enable self-iteration: set SELF_ITERATION_MODE=true in .env"
 echo "To view logs: docker compose logs -f"
-echo "To stop: Ctrl-C  (stops Playwright MCP; then 'docker compose down' for containers)"
+echo "To stop: Ctrl-C  (stops host servers; then 'docker compose down' for containers)"
 echo ""
 
 # Keep the script alive so the Playwright MCP background process isn't killed.
