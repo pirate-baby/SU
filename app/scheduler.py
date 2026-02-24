@@ -148,25 +148,18 @@ class Scheduler:
             )
 
         prompt = (
-            "The following events are coming up and need reminders:\n\n"
+            "Upcoming events:\n\n"
             + "\n".join(event_summaries) + "\n\n"
-            "Search the knowledge base for any relevant context about these "
-            "events (attendees, preparation needed, related projects, etc.). "
-            "Then compose a brief, natural reminder for each event. Keep the "
-            "tone of an attentive manservant — direct, helpful, anticipatory.\n\n"
-            "For each event, call create_interjection with the composed reminder. "
-            "Set urgency='high' and source='calendar_check'."
+            "Check the knowledge base for relevant context on any of these. "
+            "Queue a reminder for each via create_interjection (urgency='high', "
+            "source='calendar_check'). Keep reminders short and useful — "
+            "one or two sentences, no fluff."
         )
 
         system_prompt = (
-            "You are SU's calendar awareness system. You receive upcoming events "
-            "and compose contextual reminders. You have access to the knowledge "
-            "base to look up relevant context (e.g., what do we know about a "
-            "meeting's topic, who the attendees are, what preparation is needed). "
-            "Compose reminders that go beyond simple time alerts — add useful "
-            "context when available. Use create_interjection to queue each "
-            "reminder for delivery.\n\n"
-            "You are running headless. Do not ask for clarification."
+            "You compose calendar reminders for SU. Look up context in the "
+            "knowledge base when it's useful, then queue each reminder with "
+            "create_interjection. Be terse. Headless — no clarifying questions."
         )
 
         options = ClaudeAgentOptions(
