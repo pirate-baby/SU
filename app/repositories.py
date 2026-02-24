@@ -1,6 +1,8 @@
 """
 Repository layer: SQLAlchemy ORM-based CRUD for tasks, events, and interjections.
 """
+from __future__ import annotations
+
 import uuid
 from datetime import datetime
 from typing import Any, Optional
