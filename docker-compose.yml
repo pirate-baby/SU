@@ -45,6 +45,9 @@ services:
     environment:
       - HOST=0.0.0.0
       - PORT=3000
+    volumes:
+      - ${HOME}/.claude.json:/root/.claude.json:ro
+      - ${HOME}/.claude:/root/.claude:ro
     expose:
       - "3000"
     restart: unless-stopped
