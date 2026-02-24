@@ -539,6 +539,27 @@ body {
     background: #f9fafb;
 }
 
+/* Interjections — SU-initiated messages in the chat */
+.message.interjection .interjection-content {
+    background: linear-gradient(135deg, #312e81, #4c1d95);
+    color: #e0e7ff;
+    border-left: 3px solid #818cf8;
+}
+
+.interjection-label {
+    font-size: 0.7em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #a5b4fc;
+    margin-bottom: 4px;
+}
+
+.interjection-text {
+    font-style: italic;
+    line-height: 1.5;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .message-content {

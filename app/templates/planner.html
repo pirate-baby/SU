@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SU Planner</title>
+    <link rel="stylesheet" href="/static/css/planner.css">
+</head>
+<body>
+    <div class="topbar">
+        <h1>SU Planner</h1>
+        <nav class="topbar-nav">
+            <a href="/">Chat</a>
+            <a href="/sessions">Sessions</a>
+        </nav>
+    </div>
+
+    <div class="layout">
+        <!-- Left sidebar: tasks -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <span>Tasks</span>
+                <button class="icon-btn" id="add-task-btn" title="New task">+</button>
+            </div>
+            <div class="task-filters">
+                <select id="task-status-filter">
+                    <option value="pending">Pending</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="done">Done</option>
+                    <option value="">All</option>
+                </select>
+                <select id="task-priority-filter">
+                    <option value="">Any Priority</option>
+                    <option value="1">Urgent</option>
+                    <option value="2">High</option>
+                    <option value="3">Normal</option>
+                    <option value="4">Low</option>
+                </select>
+            </div>
+            <div class="task-list" id="task-list">
+                <div class="empty-state">Loading...</div>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="sidebar-header">
+                    <span>Interjections</span>
+                </div>
+                <div class="interjection-list" id="interjection-list">
+                    <div class="empty-state">None pending</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main area: calendar -->
+        <div class="main">
+            <div class="calendar-controls">
+                <button class="nav-btn" id="cal-prev">&larr;</button>
+                <h2 id="cal-title">Week of Feb 23, 2026</h2>
+                <button class="nav-btn" id="cal-next">&rarr;</button>
+                <button class="nav-btn" id="cal-today">Today</button>
+                <button class="icon-btn" id="add-event-btn" title="New event">+ Event</button>
+            </div>
+            <div class="calendar-grid" id="calendar-grid">
+                <!-- Rendered by JS -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Task modal -->
+    <div class="modal-overlay" id="task-modal" style="display:none">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="task-modal-title">New Task</h3>
+                <button class="icon-btn modal-close" id="task-modal-close">&times;</button>
+            </div>
+            <form id="task-form">
+                <input type="hidden" id="task-id">
+                <label>Title</label>
+                <input type="text" id="task-title" required>
+                <label>Description</label>
+                <textarea id="task-description" rows="3"></textarea>
+                <div class="form-row">
+                    <div>
+                        <label>Priority</label>
+                        <select id="task-priority">
+                            <option value="1">Urgent</option>
+                            <option value="2">High</option>
+                            <option value="3" selected>Normal</option>
+                            <option value="4">Low</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label>Category</label>
+                        <input type="text" id="task-category" placeholder="work, personal...">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div>
+                        <label>Due Date</label>
+                        <input type="date" id="task-due-date">
+                    </div>
+                    <div>
+                        <label>Due Time</label>
+                        <input type="time" id="task-due-time">
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" id="task-delete-btn" style="display:none">Delete</button>
+                    <div class="spacer"></div>
+                    <button type="button" class="btn-secondary" id="task-cancel-btn">Cancel</button>
+                    <button type="submit" class="btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Event modal -->
+    <div class="modal-overlay" id="event-modal" style="display:none">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="event-modal-title">New Event</h3>
+                <button class="icon-btn modal-close" id="event-modal-close">&times;</button>
+            </div>
+            <form id="event-form">
+                <input type="hidden" id="event-id">
+                <label>Title</label>
+                <input type="text" id="event-title" required>
+                <label>Description</label>
+                <textarea id="event-description" rows="2"></textarea>
+                <div class="form-row">
+                    <div>
+                        <label>Start</label>
+                        <input type="datetime-local" id="event-start" required>
+                    </div>
+                    <div>
+                        <label>End</label>
+                        <input type="datetime-local" id="event-end">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div>
+                        <label>Location</label>
+                        <input type="text" id="event-location">
+                    </div>
+                    <div>
+                        <label>
+                            <input type="checkbox" id="event-all-day"> All day
+                        </label>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" id="event-delete-btn" style="display:none">Delete</button>
+                    <div class="spacer"></div>
+                    <button type="button" class="btn-secondary" id="event-cancel-btn">Cancel</button>
+                    <button type="submit" class="btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="/static/js/planner.js"></script>
+</body>
+</html>
