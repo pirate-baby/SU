@@ -121,21 +121,21 @@ echo "Playwright MCP server started (PID $PLAYWRIGHT_PID), logs at $PLAYWRIGHT_L
 # ---------------------------------------------------------------------------
 # ~/Repos directory — isolated from the SU container
 # ---------------------------------------------------------------------------
-# SU's Docker container runs as UID 501 (appuser). We create ~/Repos owned
-# by root with mode 0700 so the container cannot read/write other repos even
-# if a volume mount is accidentally added.
+# SU's Docker container runs as UID 501 (appuser). ~/Repos is owned by the
+# host user (ubuntu) so that Vibe Kanban and git can operate on repos inside
+# it without sudo. Docker isolation is enforced by the absence of any volume
+# mount to this directory — the container simply has no path to reach it.
 REPOS_DIR="$HOME/Repos"
 if [ ! -d "$REPOS_DIR" ]; then
-    echo "Creating $REPOS_DIR (restricted to host user only)..."
-    sudo mkdir -p "$REPOS_DIR"
-    sudo chown root:root "$REPOS_DIR"
-    sudo chmod 700 "$REPOS_DIR"
+    echo "Creating $REPOS_DIR (owned by host user)..."
+    mkdir -p "$REPOS_DIR"
+    chmod 700 "$REPOS_DIR"
 else
     # Ensure permissions are correct on every start
-    sudo chown root:root "$REPOS_DIR"
-    sudo chmod 700 "$REPOS_DIR"
+    chown "$(id -u):$(id -g)" "$REPOS_DIR"
+    chmod 700 "$REPOS_DIR"
 fi
-echo "~/Repos directory secured (owner: root, mode: 700)"
+echo "~/Repos directory secured (owner: $(id -un), mode: 700)"
 
 # ---------------------------------------------------------------------------
 # Vibe Kanban (runs on HOST so it can access git, Claude Code, etc.)
