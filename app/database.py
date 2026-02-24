@@ -6,9 +6,15 @@ import aiosqlite
 from pathlib import Path
 from typing import Optional
 
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+
 DATABASE_PATH = Path(
     os.environ.get("DATABASE_PATH", "/data/sessions.db")
 )
+
+# SQLAlchemy async engine and session factory (used by repositories)
+engine = create_async_engine(f"sqlite+aiosqlite:///{DATABASE_PATH}", echo=False)
+async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
 def get_db():

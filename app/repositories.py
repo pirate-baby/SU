@@ -1,15 +1,15 @@
 """
-Repository layer: model-based CRUD for tasks, events, and interjections.
-
-Replaces scattered raw SQL with a clean data-access interface built on the
-existing Pydantic models and aiosqlite connection manager.
+Repository layer: SQLAlchemy ORM-based CRUD for tasks, events, and interjections.
 """
 import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-from app.database import get_db
+from sqlalchemy import select, update, delete
+
+from app.database import async_session
 from app.models import Task, Event, Interjection
+from app.orm import TaskRow, EventRow, InterjectionRow
 
 
 def _now() -> str:
@@ -37,17 +37,15 @@ class TaskRepo:
     ) -> Task:
         task_id = str(uuid.uuid4())
         now = _now()
-        async with get_db() as db:
-            await db.execute(
-                """INSERT INTO tasks
-                   (id, title, description, priority, category, due_date,
-                    due_time, source, source_ref, parent_task_id,
-                    created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (task_id, title, description, priority, category, due_date,
-                 due_time, source, source_ref, parent_task_id, now, now),
-            )
-            await db.commit()
+        row = TaskRow(
+            id=task_id, title=title, description=description,
+            priority=priority, category=category, due_date=due_date,
+            due_time=due_time, source=source, source_ref=source_ref,
+            parent_task_id=parent_task_id, created_at=now, updated_at=now,
+        )
+        async with async_session() as session:
+            session.add(row)
+            await session.commit()
         return Task(
             id=task_id, title=title, description=description,
             priority=priority, category=category, due_date=due_date,
@@ -59,41 +57,39 @@ class TaskRepo:
     async def update(task_id: str, **fields: Any) -> None:
         allowed = {"title", "description", "status", "priority", "category",
                     "due_date", "due_time"}
-        sets: list[str] = []
-        vals: list[Any] = []
+        values: dict[str, Any] = {}
         for key, val in fields.items():
             if key in allowed and val is not None:
-                sets.append(f"{key} = ?")
-                vals.append(val)
-        if not sets:
+                values[key] = val
+        if not values:
             return
         if fields.get("status") == "done":
-            sets.append("completed_at = ?")
-            vals.append(_now())
-        sets.append("updated_at = ?")
-        vals.append(_now())
-        vals.append(task_id)
-        async with get_db() as db:
-            await db.execute(
-                f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?", vals,
+            values["completed_at"] = _now()
+        values["updated_at"] = _now()
+        async with async_session() as session:
+            await session.execute(
+                update(TaskRow).where(TaskRow.id == task_id).values(**values)
             )
-            await db.commit()
+            await session.commit()
 
     @staticmethod
     async def complete(task_id: str) -> None:
         now = _now()
-        async with get_db() as db:
-            await db.execute(
-                "UPDATE tasks SET status = 'done', completed_at = ?, updated_at = ? WHERE id = ?",
-                (now, now, task_id),
+        async with async_session() as session:
+            await session.execute(
+                update(TaskRow)
+                .where(TaskRow.id == task_id)
+                .values(status="done", completed_at=now, updated_at=now)
             )
-            await db.commit()
+            await session.commit()
 
     @staticmethod
     async def delete(task_id: str) -> None:
-        async with get_db() as db:
-            await db.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
-            await db.commit()
+        async with async_session() as session:
+            await session.execute(
+                delete(TaskRow).where(TaskRow.id == task_id)
+            )
+            await session.commit()
 
     @staticmethod
     async def list(
@@ -105,31 +101,21 @@ class TaskRepo:
         priority: Optional[int] = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
-        clauses: list[str] = []
-        params: list[Any] = []
+        stmt = select(TaskRow)
         if status:
-            clauses.append("status = ?")
-            params.append(status)
+            stmt = stmt.where(TaskRow.status == status)
         if category:
-            clauses.append("category = ?")
-            params.append(category)
+            stmt = stmt.where(TaskRow.category == category)
         if due_before:
-            clauses.append("due_date <= ?")
-            params.append(due_before)
+            stmt = stmt.where(TaskRow.due_date <= due_before)
         if due_after:
-            clauses.append("due_date >= ?")
-            params.append(due_after)
+            stmt = stmt.where(TaskRow.due_date >= due_after)
         if priority is not None:
-            clauses.append("priority = ?")
-            params.append(priority)
-        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-        params.append(limit)
-        async with get_db() as db:
-            cursor = await db.execute(
-                f"SELECT * FROM tasks {where} ORDER BY priority ASC, due_date ASC LIMIT ?",
-                params,
-            )
-            return [dict(row) for row in await cursor.fetchall()]
+            stmt = stmt.where(TaskRow.priority == priority)
+        stmt = stmt.order_by(TaskRow.priority.asc(), TaskRow.due_date.asc()).limit(limit)
+        async with async_session() as session:
+            result = await session.execute(stmt)
+            return [row.to_dict() for row in result.scalars().all()]
 
 
 # ---------------------------------------------------------------------------
@@ -153,18 +139,16 @@ class EventRepo:
     ) -> Event:
         event_id = str(uuid.uuid4())
         now = _now()
-        async with get_db() as db:
-            await db.execute(
-                """INSERT INTO events
-                   (id, title, description, start_time, end_time, all_day,
-                    location, source, source_ref, reminder_minutes,
-                    created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (event_id, title, description, start_time, end_time,
-                 1 if all_day else 0, location, source, source_ref,
-                 reminder_minutes, now, now),
-            )
-            await db.commit()
+        row = EventRow(
+            id=event_id, title=title, description=description,
+            start_time=start_time, end_time=end_time,
+            all_day=1 if all_day else 0, location=location,
+            source=source, source_ref=source_ref,
+            reminder_minutes=reminder_minutes, created_at=now, updated_at=now,
+        )
+        async with async_session() as session:
+            session.add(row)
+            await session.commit()
         return Event(
             id=event_id, title=title, description=description,
             start_time=start_time, end_time=end_time, all_day=all_day,
@@ -176,30 +160,28 @@ class EventRepo:
     async def update(event_id: str, **fields: Any) -> None:
         allowed = {"title", "description", "start_time", "end_time",
                     "all_day", "location", "reminder_minutes"}
-        sets: list[str] = []
-        vals: list[Any] = []
+        values: dict[str, Any] = {}
         for key, val in fields.items():
             if key in allowed and val is not None:
                 if key == "all_day":
                     val = 1 if val else 0
-                sets.append(f"{key} = ?")
-                vals.append(val)
-        if not sets:
+                values[key] = val
+        if not values:
             return
-        sets.append("updated_at = ?")
-        vals.append(_now())
-        vals.append(event_id)
-        async with get_db() as db:
-            await db.execute(
-                f"UPDATE events SET {', '.join(sets)} WHERE id = ?", vals,
+        values["updated_at"] = _now()
+        async with async_session() as session:
+            await session.execute(
+                update(EventRow).where(EventRow.id == event_id).values(**values)
             )
-            await db.commit()
+            await session.commit()
 
     @staticmethod
     async def delete(event_id: str) -> None:
-        async with get_db() as db:
-            await db.execute("DELETE FROM events WHERE id = ?", (event_id,))
-            await db.commit()
+        async with async_session() as session:
+            await session.execute(
+                delete(EventRow).where(EventRow.id == event_id)
+            )
+            await session.commit()
 
     @staticmethod
     async def list(
@@ -208,35 +190,28 @@ class EventRepo:
         start_before: Optional[str] = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
-        clauses: list[str] = []
-        params: list[Any] = []
+        stmt = select(EventRow)
         if start_after:
-            clauses.append("start_time >= ?")
-            params.append(start_after)
+            stmt = stmt.where(EventRow.start_time >= start_after)
         if start_before:
-            clauses.append("start_time <= ?")
-            params.append(start_before)
-        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-        params.append(limit)
-        async with get_db() as db:
-            cursor = await db.execute(
-                f"SELECT * FROM events {where} ORDER BY start_time ASC LIMIT ?",
-                params,
-            )
-            return [dict(row) for row in await cursor.fetchall()]
+            stmt = stmt.where(EventRow.start_time <= start_before)
+        stmt = stmt.order_by(EventRow.start_time.asc()).limit(limit)
+        async with async_session() as session:
+            result = await session.execute(stmt)
+            return [row.to_dict() for row in result.scalars().all()]
 
     @staticmethod
     async def upcoming_within_window(now: datetime) -> list[dict[str, Any]]:
         """Return future events (for calendar reminder checks)."""
-        async with get_db() as db:
-            cursor = await db.execute(
-                """SELECT * FROM events
-                   WHERE start_time > ?
-                   ORDER BY start_time ASC
-                   LIMIT 50""",
-                (now.isoformat(),),
-            )
-            return [dict(row) for row in await cursor.fetchall()]
+        stmt = (
+            select(EventRow)
+            .where(EventRow.start_time > now.isoformat())
+            .order_by(EventRow.start_time.asc())
+            .limit(50)
+        )
+        async with async_session() as session:
+            result = await session.execute(stmt)
+            return [row.to_dict() for row in result.scalars().all()]
 
 
 # ---------------------------------------------------------------------------
@@ -256,16 +231,15 @@ class InterjectionRepo:
     ) -> Interjection:
         interjection_id = str(uuid.uuid4())
         now = _now()
-        async with get_db() as db:
-            await db.execute(
-                """INSERT INTO interjections
-                   (id, content, urgency, source, related_task_id,
-                    related_event_id, status, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)""",
-                (interjection_id, content, urgency, source,
-                 related_task_id, related_event_id, now),
-            )
-            await db.commit()
+        row = InterjectionRow(
+            id=interjection_id, content=content, urgency=urgency,
+            source=source, related_task_id=related_task_id,
+            related_event_id=related_event_id, status="pending",
+            created_at=now,
+        )
+        async with async_session() as session:
+            session.add(row)
+            await session.commit()
         return Interjection(
             id=interjection_id, content=content, urgency=urgency,
             source=source, related_task_id=related_task_id,
@@ -278,44 +252,43 @@ class InterjectionRepo:
         status: Optional[str] = None,
         limit: int = 20,
     ) -> list[dict[str, Any]]:
-        clauses: list[str] = []
-        params: list[Any] = []
+        stmt = select(InterjectionRow)
         if status:
-            clauses.append("status = ?")
-            params.append(status)
-        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-        params.append(limit)
-        async with get_db() as db:
-            cursor = await db.execute(
-                f"SELECT * FROM interjections {where} ORDER BY created_at DESC LIMIT ?",
-                params,
-            )
-            return [dict(row) for row in await cursor.fetchall()]
+            stmt = stmt.where(InterjectionRow.status == status)
+        stmt = stmt.order_by(InterjectionRow.created_at.desc()).limit(limit)
+        async with async_session() as session:
+            result = await session.execute(stmt)
+            return [row.to_dict() for row in result.scalars().all()]
 
     @staticmethod
     async def pending(limit: int = 10) -> list[dict[str, Any]]:
         """Return pending interjections ordered by creation time (oldest first)."""
-        async with get_db() as db:
-            cursor = await db.execute(
-                "SELECT * FROM interjections WHERE status = 'pending' ORDER BY created_at ASC LIMIT ?",
-                (limit,),
-            )
-            return [dict(row) for row in await cursor.fetchall()]
+        stmt = (
+            select(InterjectionRow)
+            .where(InterjectionRow.status == "pending")
+            .order_by(InterjectionRow.created_at.asc())
+            .limit(limit)
+        )
+        async with async_session() as session:
+            result = await session.execute(stmt)
+            return [row.to_dict() for row in result.scalars().all()]
 
     @staticmethod
     async def mark_delivered(interjection_id: str) -> None:
-        async with get_db() as db:
-            await db.execute(
-                "UPDATE interjections SET status = 'delivered', delivered_at = ? WHERE id = ?",
-                (_now(), interjection_id),
+        async with async_session() as session:
+            await session.execute(
+                update(InterjectionRow)
+                .where(InterjectionRow.id == interjection_id)
+                .values(status="delivered", delivered_at=_now())
             )
-            await db.commit()
+            await session.commit()
 
     @staticmethod
     async def dismiss(interjection_id: str) -> None:
-        async with get_db() as db:
-            await db.execute(
-                "UPDATE interjections SET status = 'dismissed' WHERE id = ?",
-                (interjection_id,),
+        async with async_session() as session:
+            await session.execute(
+                update(InterjectionRow)
+                .where(InterjectionRow.id == interjection_id)
+                .values(status="dismissed")
             )
-            await db.commit()
+            await session.commit()
