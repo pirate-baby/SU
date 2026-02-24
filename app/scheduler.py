@@ -223,7 +223,11 @@ class Scheduler:
             log.info("scheduler.calendar_fallback_created", count=len(events))
 
     async def _deliver_interjections(self) -> None:
-        """Push pending interjections to connected WebSocket clients."""
+        """Push pending interjections to connected WebSocket clients.
+
+        Falls back to Web Push notifications when no WebSocket clients
+        are connected.
+        """
         if not self._push_fn:
             return
 
@@ -233,9 +237,27 @@ class Scheduler:
 
         for item in items:
             try:
-                await self._push_fn(item)
+                ws_delivered = await self._push_fn(item)
+
+                # Fall back to Web Push if nobody got it via WebSocket
+                if ws_delivered == 0:
+                    try:
+                        from app.push_service import send_push_notification
+                        push_delivered = await send_push_notification(item)
+                        log.info(
+                            "scheduler.interjection_push_fallback",
+                            id=item["id"],
+                            push_delivered=push_delivered,
+                        )
+                    except Exception:
+                        log.exception("scheduler.web_push_failed", id=item["id"])
+
                 await InterjectionRepo.mark_delivered(item["id"])
-                log.info("scheduler.interjection_delivered", id=item["id"])
+                log.info(
+                    "scheduler.interjection_delivered",
+                    id=item["id"],
+                    ws_delivered=ws_delivered,
+                )
             except Exception:
                 log.exception("scheduler.interjection_push_failed", id=item["id"])
                 break

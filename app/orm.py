@@ -58,6 +58,18 @@ class EventRow(Base):
         return {c.key: getattr(self, c.key) for c in self.__table__.columns}
 
 
+class PushSubscriptionRow(Base):
+    __tablename__ = "push_subscriptions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    endpoint: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    subscription_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[Optional[str]] = mapped_column(String, default=None)
+
+    def to_dict(self) -> dict:
+        return {c.key: getattr(self, c.key) for c in self.__table__.columns}
+
+
 class InterjectionRow(Base):
     __tablename__ = "interjections"
 

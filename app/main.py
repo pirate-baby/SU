@@ -38,7 +38,7 @@ from app.agent_registry import (
     cleanup_idle_agents,
 )
 from app.scheduler import scheduler
-from app.repositories import TaskRepo, EventRepo, InterjectionRepo
+from app.repositories import TaskRepo, EventRepo, InterjectionRepo, PushSubscriptionRepo
 
 log = get_logger(__name__)
 
@@ -48,9 +48,14 @@ log = get_logger(__name__)
 _active_connections: dict[str, WebSocket] = {}
 
 
-async def push_interjection_to_clients(interjection: dict[str, Any]) -> None:
-    """Push an interjection to all connected WebSocket clients."""
+async def push_interjection_to_clients(interjection: dict[str, Any]) -> int:
+    """Push an interjection to all connected WebSocket clients.
+
+    Returns the number of clients that received the message.
+    If zero, the caller should fall back to Web Push.
+    """
     dead: list[str] = []
+    delivered = 0
     for sid, ws in _active_connections.items():
         try:
             await ws.send_json({
@@ -61,10 +66,12 @@ async def push_interjection_to_clients(interjection: dict[str, Any]) -> None:
                 "source": interjection.get("source"),
                 "created_at": interjection.get("created_at"),
             })
+            delivered += 1
         except Exception:
             dead.append(sid)
     for sid in dead:
         _active_connections.pop(sid, None)
+    return delivered
 
 
 async def deliver_pending_interjections(websocket: WebSocket) -> None:
@@ -408,6 +415,29 @@ async def api_list_interjections(status: str = "pending", limit: int = 20):
 async def api_dismiss_interjection(interjection_id: str):
     await InterjectionRepo.dismiss(interjection_id)
     return {"dismissed": interjection_id}
+
+
+# -- Web Push subscription API --
+
+@app.get("/api/push/vapid-key")
+async def api_vapid_public_key():
+    """Return the VAPID public key so the browser can subscribe."""
+    return {"public_key": settings.vapid_public_key or ""}
+
+
+@app.post("/api/push/subscribe")
+async def api_push_subscribe(request: Request):
+    """Store a browser push subscription."""
+    body = await request.json()
+    endpoint = body.get("endpoint", "")
+    if not endpoint:
+        raise HTTPException(400, "Missing endpoint")
+    sub_id = await PushSubscriptionRepo.upsert(
+        endpoint=endpoint,
+        subscription_json=json.dumps(body),
+    )
+    log.info("push.subscribed", sub_id=sub_id)
+    return {"id": sub_id}
 
 
 # ---- WebSocket chat ----

@@ -11,7 +11,7 @@ from sqlalchemy import select, update, delete
 
 from app.database import async_session
 from app.models import Task, Event, Interjection
-from app.orm import TaskRow, EventRow, InterjectionRow
+from app.orm import TaskRow, EventRow, InterjectionRow, PushSubscriptionRow
 
 
 def _now() -> str:
@@ -292,5 +292,52 @@ class InterjectionRepo:
                 update(InterjectionRow)
                 .where(InterjectionRow.id == interjection_id)
                 .values(status="dismissed")
+            )
+            await session.commit()
+
+
+# ---------------------------------------------------------------------------
+# Push Subscriptions
+# ---------------------------------------------------------------------------
+
+class PushSubscriptionRepo:
+    """CRUD operations for push_subscriptions (Web Push / VAPID)."""
+
+    @staticmethod
+    async def upsert(endpoint: str, subscription_json: str) -> str:
+        """Insert or update a push subscription. Returns the subscription id."""
+        async with async_session() as session:
+            # Check if this endpoint already exists
+            stmt = select(PushSubscriptionRow).where(PushSubscriptionRow.endpoint == endpoint)
+            result = await session.execute(stmt)
+            existing = result.scalar_one_or_none()
+
+            if existing:
+                existing.subscription_json = subscription_json
+                await session.commit()
+                return existing.id
+
+            sub_id = str(uuid.uuid4())
+            row = PushSubscriptionRow(
+                id=sub_id,
+                endpoint=endpoint,
+                subscription_json=subscription_json,
+                created_at=_now(),
+            )
+            session.add(row)
+            await session.commit()
+            return sub_id
+
+    @staticmethod
+    async def list_all() -> list[dict[str, Any]]:
+        async with async_session() as session:
+            result = await session.execute(select(PushSubscriptionRow))
+            return [row.to_dict() for row in result.scalars().all()]
+
+    @staticmethod
+    async def delete(sub_id: str) -> None:
+        async with async_session() as session:
+            await session.execute(
+                delete(PushSubscriptionRow).where(PushSubscriptionRow.id == sub_id)
             )
             await session.commit()
