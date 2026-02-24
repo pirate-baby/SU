@@ -125,16 +125,17 @@ if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] && [ -f .env ]; then
 fi
 export CLAUDE_CODE_OAUTH_TOKEN
 
+VK_LOG="/tmp/vibe-kanban.log"
 echo "Starting Vibe Kanban on host (port $VK_PORT)..."
-HOST=127.0.0.1 PORT=$VK_PORT npx -y vibe-kanban &
+nohup env HOST=127.0.0.1 PORT=$VK_PORT npx -y vibe-kanban > "$VK_LOG" 2>&1 &
 VK_PID=$!
 
 sleep 3
 if ! kill -0 "$VK_PID" 2>/dev/null; then
-    echo "Error: Vibe Kanban failed to start."
+    echo "Error: Vibe Kanban failed to start. Check $VK_LOG"
     exit 1
 fi
-echo "Vibe Kanban started (PID $VK_PID)"
+echo "Vibe Kanban started (PID $VK_PID), logs at $VK_LOG"
 
 # ---------------------------------------------------------------------------
 # Restart server (runs on HOST so the container can trigger its own rebuild)
