@@ -33,6 +33,7 @@ from claude_agent_sdk import (
     tool,
 )
 
+from app.config import settings
 from app.logger import get_logger
 from app.website_models import WEBSITE_REGISTRY
 
@@ -46,7 +47,8 @@ subagent_event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
 
 # Playwright MCP SSE endpoint on the host.
-PLAYWRIGHT_MCP_URL = "http://host.docker.internal:8931/sse"
+# Falls back to Docker internal URL if not explicitly configured.
+PLAYWRIGHT_MCP_URL = settings.playwright_mcp_url or "http://host.docker.internal:8931/sse"
 
 
 def _build_playwright_mcp_config() -> dict:

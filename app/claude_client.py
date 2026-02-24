@@ -20,7 +20,7 @@ from claude_agent_sdk import (
 )
 from app.config import settings
 from app.logger import get_logger
-from app.website_agent import website_mcp_server, PLAYWRIGHT_MCP_URL
+from app.website_agent import website_mcp_server
 from app.website_models import WEBSITE_REGISTRY
 from app.life_manager import life_manager_mcp_server
 
@@ -37,7 +37,7 @@ def _build_system_prompt() -> str:
         f"  - \"{name}\": {config.instructions}"
         for name, config in WEBSITE_REGISTRY.items()
     )
-    return (
+    prompt = (
         "You are SU — a dedicated personal assistant, confidant, and guide. "
         "You serve your master with the quiet competence and anticipatory "
         "awareness of an exceptional manservant. You are direct, never "
@@ -78,29 +78,22 @@ def _build_system_prompt() -> str:
         "list_events to give informed answers.\n\n"
 
         "## Website Browsing\n\n"
-        "You have two ways to browse websites:\n\n"
-        "**1. Website subagent** (`mcp__website__browse_website`): For registered "
-        "websites with pre-configured tasks. A specialized subagent handles the "
-        "full browser interaction and returns structured data.\n\n"
+        "You can browse websites via `mcp__website__browse_website`.\n\n"
         "Registered websites:\n"
         f"{website_descriptions}\n\n"
-
-        "**2. Direct Playwright** (`mcp__playwright__*`): For any website. You "
-        "have direct access to all Playwright browser tools. The browser runs "
-        "with the master's profile (cookies/sessions available). Use "
-        "`browser_snapshot` (not screenshots) for reading page state.\n\n"
-
-        "The browser connects via the Playwright MCP Bridge extension, so the "
-        "master's logged-in sessions are available."
+        "The sub-agent navigates using the master's browser profile "
+        "(logged-in sessions) and returns structured results."
     )
 
+    if settings.playwright_mcp_url:
+        prompt += (
+            "\n\n**Direct Playwright** (`mcp__playwright__*`): For any website. "
+            "You also have direct access to all Playwright browser tools. The "
+            "browser runs with the master's profile (cookies/sessions available). "
+            "Use `browser_snapshot` (not screenshots) for reading page state."
+        )
 
-def _build_playwright_mcp_config() -> dict:
-    """Connect to Playwright MCP running as an SSE server on the host."""
-    return {
-        "type": "sse",
-        "url": PLAYWRIGHT_MCP_URL,
-    }
+    return prompt
 
 
 # ---------------------------------------------------------------------------
@@ -129,8 +122,13 @@ class ClaudeChat:
         mcp_servers = {
             "website": website_mcp_server,
             "life_manager": life_manager_mcp_server,
-            "playwright": _build_playwright_mcp_config(),
         }
+
+        if settings.playwright_mcp_url:
+            mcp_servers["playwright"] = {
+                "type": "sse",
+                "url": settings.playwright_mcp_url,
+            }
 
         if settings.self_iteration_mode:
             from app.restart_tool import restart_mcp_server

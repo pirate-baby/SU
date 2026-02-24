@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     claude_code_oauth_token: Optional[str] = None
     self_iteration_mode: bool = False
 
+    # Playwright MCP Bridge (optional — chat works without it)
+    playwright_mcp_url: Optional[str] = None
+
     # ElevenLabs Voice Mode
     elevenlabs_api_key: Optional[str] = None
     elevenlabs_voice_id: Optional[str] = None
