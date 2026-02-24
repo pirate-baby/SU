@@ -16,6 +16,14 @@ const wsUrl = `${wsProtocol}//${window.location.host}/ws/chat/${SESSION_ID}`;
 // Track pending tool calls so we can pair results with their call
 const pendingToolCalls = new Map();
 
+// Accumulates raw markdown text while assistant is streaming
+let currentAssistantText = '';
+
+function renderMarkdown(text) {
+    if (typeof marked === 'undefined') return escapeHtml(text);
+    return marked.parse(text);
+}
+
 function connect() {
     setStatus('Connecting...', 'warning');
 
@@ -142,6 +150,7 @@ function handleMessage(data) {
 }
 
 function createAssistantMessage() {
+    currentAssistantText = '';
     const messageDiv = document.createElement('div');
     messageDiv.className = 'message assistant';
     messageDiv.id = 'current-assistant-message';
@@ -174,8 +183,9 @@ function appendToAssistantMessage(chunk) {
     if (!contentDiv) return;
 
     removeThinkingDots();
+    currentAssistantText += chunk;
 
-    // Append text to the last text node, or create one
+    // Show raw text while streaming; markdown rendered on finalize
     let textSpan = contentDiv.querySelector('.text-content:last-of-type');
     if (!textSpan || contentDiv.lastElementChild !== textSpan) {
         textSpan = document.createElement('span');
@@ -414,6 +424,17 @@ function finalizeAssistantMessage() {
     const messageDiv = document.getElementById('current-assistant-message');
     const contentDiv = document.getElementById('current-assistant-content');
 
+    // Replace streamed plain text with rendered markdown
+    if (contentDiv && currentAssistantText) {
+        const textSpans = contentDiv.querySelectorAll('.text-content');
+        textSpans.forEach(s => s.remove());
+        const mdDiv = document.createElement('div');
+        mdDiv.className = 'markdown-content';
+        mdDiv.innerHTML = renderMarkdown(currentAssistantText);
+        contentDiv.appendChild(mdDiv);
+        currentAssistantText = '';
+    }
+
     if (messageDiv) messageDiv.id = '';
     if (contentDiv) contentDiv.id = '';
 
@@ -441,7 +462,15 @@ function appendMessage(role, content, isError = false) {
 
     const contentDiv = document.createElement('div');
     contentDiv.className = 'message-content';
-    contentDiv.textContent = content;
+
+    if (role === 'assistant' && !isError) {
+        const mdDiv = document.createElement('div');
+        mdDiv.className = 'markdown-content';
+        mdDiv.innerHTML = renderMarkdown(content);
+        contentDiv.appendChild(mdDiv);
+    } else {
+        contentDiv.textContent = content;
+    }
 
     messageDiv.appendChild(contentDiv);
     messagesContainer.appendChild(messageDiv);

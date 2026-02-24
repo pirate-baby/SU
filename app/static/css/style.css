@@ -138,6 +138,12 @@ body {
     background: var(--surface);
 }
 
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
 .chat-header h2 {
     color: var(--green);
     font-size: 1.1em;
@@ -145,6 +151,33 @@ body {
     font-weight: 600;
     letter-spacing: 0.08em;
     text-shadow: 0 0 10px var(--green-glow);
+}
+
+.header-home-link {
+    color: inherit;
+    text-decoration: none;
+}
+
+.header-home-link:hover {
+    text-shadow: 0 0 16px var(--green-glow);
+}
+
+.header-nav {
+    display: flex;
+    gap: 16px;
+}
+
+.header-nav a {
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 0.8em;
+    font-family: var(--mono);
+    letter-spacing: 0.05em;
+    transition: color 0.15s;
+}
+
+.header-nav a:hover {
+    color: var(--green);
 }
 
 .header-actions {
@@ -207,6 +240,7 @@ body {
     color: var(--green);
     border: 1px solid var(--border);
     border-left: 2px solid var(--green-dim);
+    max-width: 85%;
 }
 
 .message.system .message-content {
@@ -221,6 +255,121 @@ body {
     background: #1a0a0a;
     color: var(--red);
     border: 1px solid #331111;
+}
+
+/* Markdown rendered content */
+.markdown-content {
+    white-space: normal;
+}
+
+.markdown-content p {
+    margin: 0 0 0.75em;
+}
+
+.markdown-content p:last-child {
+    margin-bottom: 0;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4 {
+    color: var(--green);
+    font-family: var(--mono);
+    font-weight: 600;
+    margin: 0.9em 0 0.4em;
+    letter-spacing: 0.04em;
+}
+
+.markdown-content h1 { font-size: 1.15em; }
+.markdown-content h2 { font-size: 1.05em; }
+.markdown-content h3 { font-size: 0.95em; }
+
+.markdown-content code {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    padding: 0.1em 0.35em;
+    font-size: 0.9em;
+    font-family: var(--mono);
+    color: var(--yellow);
+}
+
+.markdown-content pre {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--green-dim);
+    padding: 10px 14px;
+    overflow-x: auto;
+    margin: 0.6em 0;
+}
+
+.markdown-content pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--green);
+    font-size: 0.88em;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+    padding-left: 1.4em;
+    margin: 0.4em 0;
+}
+
+.markdown-content li {
+    margin: 0.2em 0;
+}
+
+.markdown-content blockquote {
+    border-left: 2px solid var(--green-dim);
+    margin: 0.5em 0;
+    padding: 0.2em 0.8em;
+    color: var(--text-muted);
+}
+
+.markdown-content strong {
+    color: var(--text);
+    font-weight: 600;
+}
+
+.markdown-content em {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.markdown-content a {
+    color: var(--blue);
+    text-decoration: none;
+}
+
+.markdown-content a:hover {
+    text-decoration: underline;
+}
+
+.markdown-content hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 0.8em 0;
+}
+
+.markdown-content table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 0.5em 0;
+    font-size: 0.88em;
+}
+
+.markdown-content th,
+.markdown-content td {
+    border: 1px solid var(--border);
+    padding: 4px 10px;
+    text-align: left;
+}
+
+.markdown-content th {
+    background: var(--surface2);
+    color: var(--green);
 }
 
 /* Thinking dots animation */

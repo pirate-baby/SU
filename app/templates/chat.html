@@ -15,7 +15,14 @@
     <div class="container">
         <div class="chat-container">
             <div class="chat-header">
-                <h2>SU</h2>
+                <div class="header-left">
+                    <h2><a href="/" class="header-home-link">SU</a></h2>
+                    <nav class="header-nav">
+                        <a href="/">Home</a>
+                        <a href="/sessions">Logs</a>
+                        <a href="/planner">Planner</a>
+                    </nav>
+                </div>
                 <div class="header-actions">
                     <span class="session-id">Session: {{ session_id[:8] }}</span>
                     <button id="end-session-btn" class="danger-btn">End</button>
@@ -55,6 +62,7 @@
     <script>
         const SESSION_ID = "{{ session_id }}";
     </script>
+    <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
     <script src="/static/js/voice.js"></script>
     <script src="/static/js/chat.js"></script>
     <script src="/static/js/notifications.js"></script>
