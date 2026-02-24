@@ -91,6 +91,46 @@ fi
 echo "Playwright MCP server started (PID $PLAYWRIGHT_PID)"
 
 # ---------------------------------------------------------------------------
+# ~/Repos directory — isolated from the SU container
+# ---------------------------------------------------------------------------
+# SU's Docker container runs as UID 501 (appuser). We create ~/Repos owned
+# by root with mode 0700 so the container cannot read/write other repos even
+# if a volume mount is accidentally added.
+REPOS_DIR="$HOME/Repos"
+if [ ! -d "$REPOS_DIR" ]; then
+    echo "Creating $REPOS_DIR (restricted to host user only)..."
+    sudo mkdir -p "$REPOS_DIR"
+    sudo chown root:root "$REPOS_DIR"
+    sudo chmod 700 "$REPOS_DIR"
+else
+    # Ensure permissions are correct on every start
+    sudo chown root:root "$REPOS_DIR"
+    sudo chmod 700 "$REPOS_DIR"
+fi
+echo "~/Repos directory secured (owner: root, mode: 700)"
+
+# ---------------------------------------------------------------------------
+# Vibe Kanban (runs on HOST, port 53187)
+# ---------------------------------------------------------------------------
+VIBE_KANBAN_PORT=53187
+if lsof -ti :${VIBE_KANBAN_PORT} >/dev/null 2>&1; then
+    echo "Stopping existing Vibe Kanban on port ${VIBE_KANBAN_PORT}..."
+    lsof -ti :${VIBE_KANBAN_PORT} | xargs kill -9 2>/dev/null || true
+    sleep 1
+fi
+
+echo "Starting Vibe Kanban on host (port ${VIBE_KANBAN_PORT})..."
+PORT=${VIBE_KANBAN_PORT} npx -y vibe-kanban &
+VIBE_KANBAN_PID=$!
+
+sleep 2
+if ! kill -0 "$VIBE_KANBAN_PID" 2>/dev/null; then
+    echo "Warning: Vibe Kanban failed to start. Continuing without it."
+else
+    echo "Vibe Kanban started (PID $VIBE_KANBAN_PID)"
+fi
+
+# ---------------------------------------------------------------------------
 # Restart server (runs on HOST so the container can trigger its own rebuild)
 # ---------------------------------------------------------------------------
 # Kill any existing restart server on port 8932
@@ -122,6 +162,12 @@ cleanup() {
     fi
     kill "$PLAYWRIGHT_PID" 2>/dev/null || true
     wait "$PLAYWRIGHT_PID" 2>/dev/null || true
+    # Stop Vibe Kanban
+    if lsof -ti :${VIBE_KANBAN_PORT} >/dev/null 2>&1; then
+        lsof -ti :${VIBE_KANBAN_PORT} | xargs kill 2>/dev/null || true
+    fi
+    kill "$VIBE_KANBAN_PID" 2>/dev/null || true
+    wait "$VIBE_KANBAN_PID" 2>/dev/null || true
     # Stop restart server
     if lsof -ti :8932 >/dev/null 2>&1; then
         lsof -ti :8932 | xargs kill 2>/dev/null || true
@@ -143,6 +189,7 @@ echo ""
 echo "Services started successfully!"
 echo ""
 echo "Access the chat at: http://localhost"
+echo "Vibe Kanban running on: http://localhost:${VIBE_KANBAN_PORT} (proxied at /kanban/)"
 echo "Playwright MCP server running on: http://localhost:8931/sse"
 echo "Restart server running on: http://localhost:8932/health"
 echo ""
