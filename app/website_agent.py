@@ -45,11 +45,15 @@ SUBAGENT_TIMEOUT_SECONDS = 120
 subagent_event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
 
+# Playwright MCP SSE endpoint on the host.
+PLAYWRIGHT_MCP_URL = "http://host.docker.internal:8931/sse"
+
+
 def _build_playwright_mcp_config() -> dict:
     """Connect to Playwright MCP running as an SSE server on the host."""
     return {
         "type": "sse",
-        "url": "http://host.docker.internal:8931/sse",
+        "url": PLAYWRIGHT_MCP_URL,
     }
 
 

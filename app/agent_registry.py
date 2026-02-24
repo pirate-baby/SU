@@ -35,9 +35,8 @@ async def get_or_create_agent(session_id: str) -> ClaudeChat:
         log.info("registry.reuse_agent", session_id=session_id)
         return _agents[session_id]
 
-    mode = "self_iteration" if settings.self_iteration_mode else "chat"
     oauth = settings.claude_code_oauth_token or None
-    claude = ClaudeChat(oauth_token=oauth, mode=mode)
+    claude = ClaudeChat(oauth_token=oauth)
     await claude.connect()
 
     _agents[session_id] = claude
@@ -47,7 +46,7 @@ async def get_or_create_agent(session_id: str) -> ClaudeChat:
     # If there is existing conversation history, inject it so the agent has context
     await _inject_history(session_id, claude)
 
-    log.info("registry.created_agent", session_id=session_id, mode=mode)
+    log.info("registry.created_agent", session_id=session_id)
     return claude
 
 
