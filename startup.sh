@@ -153,9 +153,23 @@ if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] && [ -f "$SCRIPT_DIR/.env" ]; then
 fi
 export CLAUDE_CODE_OAUTH_TOKEN
 
+# Build VK_ALLOWED_ORIGINS from all machine IPs so Vibe Kanban accepts
+# requests proxied through nginx (Tailscale, LAN, localhost, etc.)
+if [ -z "$VK_ALLOWED_ORIGINS" ]; then
+    VK_ORIGINS="https://localhost:53187,http://localhost:53187"
+    # Collect non-loopback IPv4 addresses
+    for ip in $(hostname -I 2>/dev/null || ifconfig 2>/dev/null | grep 'inet ' | awk '{print $2}' | grep -v '^127\.'); do
+        ip=$(echo "$ip" | tr -d '[:space:]')
+        [ -n "$ip" ] && VK_ORIGINS="$VK_ORIGINS,https://$ip:53187,http://$ip:53187"
+    done
+    VK_ALLOWED_ORIGINS="$VK_ORIGINS"
+fi
+export VK_ALLOWED_ORIGINS
+echo "Vibe Kanban allowed origins: $VK_ALLOWED_ORIGINS"
+
 VK_LOG="$LOG_DIR/vibe-kanban.log"
 echo "Starting Vibe Kanban on host (port $VK_PORT)..."
-nohup env HOST=0.0.0.0 PORT=$VK_PORT npx -y vibe-kanban > "$VK_LOG" 2>&1 &
+nohup env HOST=0.0.0.0 PORT=$VK_PORT VK_ALLOWED_ORIGINS="$VK_ALLOWED_ORIGINS" npx -y vibe-kanban > "$VK_LOG" 2>&1 &
 VK_PID=$!
 
 sleep 3
