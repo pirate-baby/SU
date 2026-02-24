@@ -10,6 +10,7 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import Any, Callable, Coroutine, Optional
 
+from app.config import settings
 from app.logger import get_logger
 from app.repositories import EventRepo, InterjectionRepo
 
@@ -209,7 +210,7 @@ class Scheduler:
                     time_str = f"in about {hours} hour{'s' if hours > 1 else ''}"
                 location = f" at {event['location']}" if event.get("location") else ""
                 await InterjectionRepo.create(
-                    content=f"Sir, a reminder: \"{event['title']}\"{location} is {time_str}.",
+                    content=f"{settings.user_name}, a reminder: \"{event['title']}\"{location} is {time_str}.",
                     urgency="high",
                     source="calendar_check",
                     related_event_id=event["id"],

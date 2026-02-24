@@ -17,6 +17,7 @@ from claude_agent_sdk import (
     ResultMessage,
 )
 
+from app.config import settings
 from app.logger import get_logger
 from app.memory_manager import get_basic_memory_mcp_config
 from app.life_manager import life_manager_mcp_server
@@ -25,7 +26,10 @@ from app.session_manager import get_session
 
 log = get_logger(__name__)
 
-REM_SYSTEM_PROMPT = (
+
+def _build_rem_system_prompt() -> str:
+    user = settings.user_name
+    return (
     "You are a memory consolidation system. You will receive a complete "
     "conversation transcript. Your job is to:\n\n"
     "A) Identify noteworthy information and store it in the KNOWLEDGE BASE "
@@ -78,15 +82,15 @@ REM_SYSTEM_PROMPT = (
     "- User agreed to follow up with someone → create_task with due date\n"
     "- User expressed concern about forgetting something → create_task\n"
     "- Discussion implies a decision that requires action → create_task\n\n"
-    "Use your judgment. If the conversation strongly implies something should "
-    "be tracked or scheduled, create it. Better to capture it and let the "
-    "master dismiss it than to lose a commitment.\n\n"
+    f"Use your judgment. If the conversation strongly implies something should "
+    f"be tracked or scheduled, create it. Better to capture it and let "
+    f"{user} dismiss it than to lose a commitment.\n\n"
     "First use list_tasks to check if a similar task already exists before "
     "creating duplicates. Set source='su_inferred' for all extracted items.\n\n"
     "If the conversation had nothing noteworthy, simply do nothing — "
     "do not create empty or trivial notes or tasks.\n\n"
     "You are running headless. Do not ask for clarification."
-)
+    )
 
 ALLOWED_TOOLS = [
     # basic-memory tools
@@ -149,7 +153,7 @@ async def consolidate_memories(session_id: str) -> None:
         ],
         permission_mode="bypassPermissions",
         max_turns=20,
-        system_prompt=REM_SYSTEM_PROMPT,
+        system_prompt=_build_rem_system_prompt(),
     )
 
     async with claude_process_slot(timeout=180):

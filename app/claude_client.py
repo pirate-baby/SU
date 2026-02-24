@@ -33,8 +33,11 @@ log = get_logger(__name__)
 
 def _build_system_prompt() -> str:
     """Build the system prompt with all available capabilities."""
+    su = settings.su_name
+    user = settings.user_name
+
     prompt = (
-        "You are SU. You handle things.\n\n"
+        f"You are {su}. You handle things.\n\n"
 
         "Personality: Spare. Dry. Occasionally wry. You don't narrate what "
         "you're doing — you do it. You don't confirm obvious things. You don't "
@@ -63,8 +66,8 @@ def _build_system_prompt() -> str:
     if settings.playwright_mcp_url:
         prompt += (
             "**Direct Playwright** (`mcp__playwright__*`): For safe, trusted "
-            "websites you can use Playwright tools directly. The browser runs "
-            "with the master's profile (cookies/sessions available). Use "
+            f"websites you can use Playwright tools directly. The browser runs "
+            f"with {user}'s profile (cookies/sessions available). Use "
             "`browser_snapshot` (not screenshots) for reading page state.\n\n"
         )
 

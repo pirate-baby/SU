@@ -8,6 +8,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
+    # User identity (one instance = one user)
+    user_name: str
+    user_gender: str = "male"  # male | female | neutral
+    su_name: str = "SU"
+
     claude_code_oauth_token: Optional[str] = None
     self_iteration_mode: bool = False
 

@@ -1,6 +1,6 @@
 """
 Life Manager MCP server: exposes task, event, and interjection CRUD as MCP
-tools so Claude can manage the master's schedule and tasks during conversation.
+tools so Claude can manage the user's schedule and tasks during conversation.
 
 Also used by background scheduler agents to read/write operational state.
 """
@@ -22,6 +22,7 @@ if "version" not in inspect.signature(_orig_server_init).parameters:
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
+from app.config import settings
 from app.logger import get_logger
 from app.repositories import TaskRepo, EventRepo, InterjectionRepo
 
@@ -44,7 +45,7 @@ def _json_response(data: Any, is_error: bool = False) -> dict[str, Any]:
 
 @tool(
     "create_task",
-    "Create a new task for the master. Returns the created task.",
+    f"Create a new task for {settings.user_name}. Returns the created task.",
     {
         "type": "object",
         "properties": {
@@ -208,7 +209,7 @@ async def delete_task(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "create_event",
-    "Create a calendar event for the master.",
+    f"Create a calendar event for {settings.user_name}.",
     {
         "type": "object",
         "properties": {
@@ -329,19 +330,19 @@ async def delete_event(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "create_interjection",
-    "Queue a message from SU to the master. Used by background processes "
+    f"Queue a message from {settings.su_name} to {settings.user_name}. Used by background processes "
     "to proactively reach out — reminders, observations, coaching.",
     {
         "type": "object",
         "properties": {
             "content": {
                 "type": "string",
-                "description": "The message SU wants to deliver to the master",
+                "description": f"The message {settings.su_name} wants to deliver to {settings.user_name}",
             },
             "urgency": {
                 "type": "string",
                 "enum": ["low", "normal", "high", "urgent"],
-                "description": "How urgently the master should see this",
+                "description": f"How urgently {settings.user_name} should see this",
             },
             "source": {
                 "type": "string",
