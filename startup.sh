@@ -127,7 +127,7 @@ export CLAUDE_CODE_OAUTH_TOKEN
 
 VK_LOG="/tmp/vibe-kanban.log"
 echo "Starting Vibe Kanban on host (port $VK_PORT)..."
-nohup env HOST=127.0.0.1 PORT=$VK_PORT npx -y vibe-kanban > "$VK_LOG" 2>&1 &
+nohup env HOST=0.0.0.0 PORT=$VK_PORT npx -y vibe-kanban > "$VK_LOG" 2>&1 &
 VK_PID=$!
 
 sleep 3
@@ -185,18 +185,35 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # ---------------------------------------------------------------------------
+# Self-signed SSL certificates (for Tailscale / non-localhost access)
+# ---------------------------------------------------------------------------
+SSL_DIR="$SCRIPT_DIR/nginx/ssl"
+if [ ! -f "$SSL_DIR/cert.pem" ] || [ ! -f "$SSL_DIR/key.pem" ]; then
+    echo "Generating self-signed SSL certificates..."
+    mkdir -p "$SSL_DIR"
+    openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+        -keyout "$SSL_DIR/key.pem" \
+        -out "$SSL_DIR/cert.pem" \
+        -subj "/CN=localhost" \
+        -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+        2>/dev/null
+    echo "SSL certificates generated at $SSL_DIR/"
+else
+    echo "SSL certificates already exist at $SSL_DIR/"
+fi
+
+# ---------------------------------------------------------------------------
 # Docker services
 # ---------------------------------------------------------------------------
 
-# Use local development configuration (HTTP only, no SSL)
-echo "Starting services with local development configuration (HTTP only)..."
+echo "Starting services with local development configuration..."
 docker compose -f docker-compose.yml -f docker-compose.local.yml up --build -d
 
 echo ""
 echo "Services started successfully!"
 echo ""
 echo "Access the chat at: http://localhost"
-echo "Vibe Kanban running on: http://localhost:53187 (host process via nginx)"
+echo "Vibe Kanban running on: https://localhost:53187 (host process via nginx)"
 echo "Playwright MCP server running on: http://localhost:8931/sse"
 echo "Restart server running on: http://localhost:8932/health"
 echo ""

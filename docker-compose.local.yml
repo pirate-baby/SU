@@ -9,9 +9,10 @@ services:
 
   nginx:
     volumes:
-      # Override with local nginx config (HTTP only, no SSL)
+      # Override with local nginx config
       - ./nginx/nginx.local.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
     ports:
-      # Only expose HTTP port for local development (+ VK)
+      # HTTP for Claude backend, HTTPS for Vibe Kanban
       - "80:80"
       - "53187:53187"
