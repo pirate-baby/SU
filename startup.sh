@@ -120,7 +120,8 @@ if lsof -ti :${VIBE_KANBAN_PORT} >/dev/null 2>&1; then
 fi
 
 echo "Starting Vibe Kanban on host (port ${VIBE_KANBAN_PORT})..."
-PORT=${VIBE_KANBAN_PORT} npx -y vibe-kanban &
+# Bind to 0.0.0.0 so it's reachable from Docker containers and external clients
+HOST=0.0.0.0 PORT=${VIBE_KANBAN_PORT} npx -y vibe-kanban &
 VIBE_KANBAN_PID=$!
 
 sleep 2

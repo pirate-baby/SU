@@ -14,11 +14,16 @@
             <button id="new-chat-btn" class="primary-btn">New Session</button>
             <p style="margin-top: 24px;"><a href="/planner">Planner</a></p>
             <p style="margin-top: 8px;"><a href="/sessions">Session Logs</a></p>
-            <p style="margin-top: 8px;"><a href="/kanban/" target="_blank">Vibe Kanban</a></p>
+            <p style="margin-top: 8px;"><a id="vibe-kanban-link" href="#" target="_blank">Vibe Kanban</a></p>
         </div>
     </div>
 
     <script>
+        // Build Vibe Kanban URL using the current hostname so it works
+        // regardless of whether the user accesses SU via IP, domain, or localhost.
+        document.getElementById('vibe-kanban-link').href =
+            location.protocol + '//' + location.hostname + ':53187';
+
         document.getElementById('new-chat-btn').addEventListener('click', async () => {
             try {
                 const response = await fetch('/api/sessions/new', {
