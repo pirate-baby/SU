@@ -7,10 +7,10 @@ echo "Starting Claude Chat Service..."
 # Check for .claude directory (needed for authentication)
 if [ ! -d "$HOME/.claude" ]; then
     echo "Warning: $HOME/.claude directory not found"
-    echo "Make sure you've authenticated with Claude Code CLI:"
+    echo "Make sure you've authenticated with Claude Code CLI on the host:"
     echo "  claude login"
     echo ""
-    echo "Continuing anyway (you can set CLAUDE_CODE_OAUTH_TOKEN environment variable instead)..."
+    echo "Continuing anyway (the container uses the host's ~/.claude credentials)..."
 fi
 
 # ---------------------------------------------------------------------------

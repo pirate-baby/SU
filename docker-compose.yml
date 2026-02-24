@@ -14,7 +14,6 @@ services:
       - .:/src
     environment:
       - PYTHONUNBUFFERED=1
-      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
       - DATABASE_PATH=/data/sessions.db
       - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
       - ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID:-}
