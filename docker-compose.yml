@@ -11,6 +11,7 @@ services:
       - ${CLAUDE_WORKDIR:-./claude-workspace}:/workspace
       - basic-memory-data:/home/appuser/basic-memory
       - session-data:/data
+      - ./.env:/app/.env:ro
       - .:/src
     environment:
       - PYTHONUNBUFFERED=1
