@@ -222,7 +222,7 @@ docker compose -f "$SCRIPT_DIR/docker-compose.yml" -f "$SCRIPT_DIR/docker-compos
 echo ""
 echo "Services started successfully! (all processes daemonized)"
 echo ""
-echo "Access the chat at: http://localhost"
+echo "Access the chat at: https://localhost"
 echo "Vibe Kanban running on: https://localhost:53187 (host process via nginx)"
 echo "Playwright MCP server running on: http://localhost:8931/sse"
 echo "Restart server running on: http://localhost:8932/health"

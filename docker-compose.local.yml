@@ -13,6 +13,6 @@ services:
       - ./nginx/nginx.local.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/ssl:/etc/nginx/ssl:ro
     ports:
-      # HTTP for Claude backend, HTTPS for Vibe Kanban
       - "80:80"
+      - "443:443"
       - "53187:53187"
