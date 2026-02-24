@@ -2,7 +2,34 @@
 
 set -e
 
-echo "Starting Claude Chat Service..."
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PID_FILE="/tmp/su-startup.pids"
+LOG_DIR="/tmp"
+
+# ---------------------------------------------------------------------------
+# stop subcommand — tears down all host-side processes and Docker containers
+# ---------------------------------------------------------------------------
+if [ "${1:-}" = "stop" ]; then
+    echo "Stopping Claude Chat Service..."
+
+    # Stop host-side processes by port
+    for PORT in 8931 8932 3001; do
+        if lsof -ti :$PORT >/dev/null 2>&1; then
+            echo "  Stopping process on port $PORT..."
+            lsof -ti :$PORT | xargs kill 2>/dev/null || true
+        fi
+    done
+
+    # Stop Docker containers
+    echo "  Stopping Docker containers..."
+    docker compose -f "$SCRIPT_DIR/docker-compose.yml" -f "$SCRIPT_DIR/docker-compose.local.yml" down 2>/dev/null || true
+
+    rm -f "$PID_FILE"
+    echo "All services stopped."
+    exit 0
+fi
+
+echo "Starting Claude Chat Service (daemonized)..."
 
 # Check for .claude directory (needed for authentication)
 if [ ! -d "$HOME/.claude" ]; then
@@ -64,8 +91,8 @@ echo "Starting Playwright MCP server on host (port 8931) in extension mode..."
 #   with "Host: host.docker.internal:8931" (from inside Docker) are not rejected.
 # Load PLAYWRIGHT_MCP_EXTENSION_TOKEN from .env if not already set
 if [ -z "$PLAYWRIGHT_MCP_EXTENSION_TOKEN" ]; then
-    if [ -f .env ]; then
-        PLAYWRIGHT_MCP_EXTENSION_TOKEN=$(grep -E '^PLAYWRIGHT_MCP_EXTENSION_TOKEN=' .env | cut -d'=' -f2- | tr -d '"' | tr -d "'")
+    if [ -f "$SCRIPT_DIR/.env" ]; then
+        PLAYWRIGHT_MCP_EXTENSION_TOKEN=$(grep -E '^PLAYWRIGHT_MCP_EXTENSION_TOKEN=' "$SCRIPT_DIR/.env" | cut -d'=' -f2- | tr -d '"' | tr -d "'")
     fi
     if [ -z "$PLAYWRIGHT_MCP_EXTENSION_TOKEN" ]; then
         echo "Error: PLAYWRIGHT_MCP_EXTENSION_TOKEN is not set."
@@ -74,21 +101,22 @@ if [ -z "$PLAYWRIGHT_MCP_EXTENSION_TOKEN" ]; then
     fi
 fi
 export PLAYWRIGHT_MCP_EXTENSION_TOKEN
-npx -y @playwright/mcp@latest \
+PLAYWRIGHT_LOG="$LOG_DIR/playwright-mcp.log"
+nohup npx -y @playwright/mcp@latest \
     --extension \
     --host 0.0.0.0 \
     --allowed-hosts '*' \
-    --port 8931 &
+    --port 8931 > "$PLAYWRIGHT_LOG" 2>&1 &
 PLAYWRIGHT_PID=$!
 
 # Wait briefly and verify the process is still running
 sleep 2
 if ! kill -0 "$PLAYWRIGHT_PID" 2>/dev/null; then
-    echo "Error: Playwright MCP server failed to start."
-    echo "Check that Chrome is running and the Playwright MCP Bridge extension is installed."
+    echo "Error: Playwright MCP server failed to start. Check $PLAYWRIGHT_LOG"
+    echo "Make sure Chrome is running and the Playwright MCP Bridge extension is installed."
     exit 1
 fi
-echo "Playwright MCP server started (PID $PLAYWRIGHT_PID)"
+echo "Playwright MCP server started (PID $PLAYWRIGHT_PID), logs at $PLAYWRIGHT_LOG"
 
 # ---------------------------------------------------------------------------
 # ~/Repos directory — isolated from the SU container
@@ -120,12 +148,12 @@ if lsof -ti :$VK_PORT >/dev/null 2>&1; then
 fi
 
 # Load CLAUDE_CODE_OAUTH_TOKEN from .env if not already set
-if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] && [ -f .env ]; then
-    CLAUDE_CODE_OAUTH_TOKEN=$(grep -E '^CLAUDE_CODE_OAUTH_TOKEN=' .env | cut -d'=' -f2- | tr -d '"' | tr -d "'")
+if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] && [ -f "$SCRIPT_DIR/.env" ]; then
+    CLAUDE_CODE_OAUTH_TOKEN=$(grep -E '^CLAUDE_CODE_OAUTH_TOKEN=' "$SCRIPT_DIR/.env" | cut -d'=' -f2- | tr -d '"' | tr -d "'")
 fi
 export CLAUDE_CODE_OAUTH_TOKEN
 
-VK_LOG="/tmp/vibe-kanban.log"
+VK_LOG="$LOG_DIR/vibe-kanban.log"
 echo "Starting Vibe Kanban on host (port $VK_PORT)..."
 nohup env HOST=0.0.0.0 PORT=$VK_PORT npx -y vibe-kanban > "$VK_LOG" 2>&1 &
 VK_PID=$!
@@ -147,42 +175,24 @@ if lsof -ti :8932 >/dev/null 2>&1; then
     sleep 1
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+RESTART_LOG="$LOG_DIR/restart-server.log"
 echo "Starting restart server on host (port 8932)..."
-SU_REPO_DIR="$SCRIPT_DIR" python3 "$SCRIPT_DIR/restart_server.py" &
+nohup env SU_REPO_DIR="$SCRIPT_DIR" python3 "$SCRIPT_DIR/restart_server.py" > "$RESTART_LOG" 2>&1 &
 RESTART_PID=$!
 
 sleep 1
 if ! kill -0 "$RESTART_PID" 2>/dev/null; then
-    echo "Error: Restart server failed to start."
+    echo "Error: Restart server failed to start. Check $RESTART_LOG"
     exit 1
 fi
-echo "Restart server started (PID $RESTART_PID)"
+echo "Restart server started (PID $RESTART_PID), logs at $RESTART_LOG"
 
-# Ensure background servers are stopped when this script exits
-cleanup() {
-    echo ""
-    echo "Shutting down background servers..."
-    # Stop Playwright MCP
-    if lsof -ti :8931 >/dev/null 2>&1; then
-        lsof -ti :8931 | xargs kill 2>/dev/null || true
-    fi
-    kill "$PLAYWRIGHT_PID" 2>/dev/null || true
-    wait "$PLAYWRIGHT_PID" 2>/dev/null || true
-    # Stop Vibe Kanban
-    if lsof -ti :$VK_PORT >/dev/null 2>&1; then
-        lsof -ti :$VK_PORT | xargs kill 2>/dev/null || true
-    fi
-    kill "$VK_PID" 2>/dev/null || true
-    wait "$VK_PID" 2>/dev/null || true
-    # Stop restart server
-    if lsof -ti :8932 >/dev/null 2>&1; then
-        lsof -ti :8932 | xargs kill 2>/dev/null || true
-    fi
-    kill "$RESTART_PID" 2>/dev/null || true
-    wait "$RESTART_PID" 2>/dev/null || true
-}
-trap cleanup EXIT INT TERM
+# Save PIDs for the stop command
+cat > "$PID_FILE" <<EOF
+PLAYWRIGHT_PID=$PLAYWRIGHT_PID
+VK_PID=$VK_PID
+RESTART_PID=$RESTART_PID
+EOF
 
 # ---------------------------------------------------------------------------
 # Self-signed SSL certificates (for Tailscale / non-localhost access)
@@ -207,10 +217,10 @@ fi
 # ---------------------------------------------------------------------------
 
 echo "Starting services with local development configuration..."
-docker compose -f docker-compose.yml -f docker-compose.local.yml up --build -d
+docker compose -f "$SCRIPT_DIR/docker-compose.yml" -f "$SCRIPT_DIR/docker-compose.local.yml" up --build -d
 
 echo ""
-echo "Services started successfully!"
+echo "Services started successfully! (all processes daemonized)"
 echo ""
 echo "Access the chat at: http://localhost"
 echo "Vibe Kanban running on: https://localhost:53187 (host process via nginx)"
@@ -218,16 +228,12 @@ echo "Playwright MCP server running on: http://localhost:8931/sse"
 echo "Restart server running on: http://localhost:8932/health"
 echo ""
 echo "To enable self-iteration: set SELF_ITERATION_MODE=true in .env"
-echo "To view logs: docker compose logs -f"
-echo "To stop: Ctrl-C  (stops host servers; then 'docker compose down' for containers)"
+echo "To view logs:"
+echo "  Docker:         docker compose logs -f"
+echo "  Playwright MCP: tail -f $PLAYWRIGHT_LOG"
+echo "  Vibe Kanban:    tail -f $VK_LOG"
+echo "  Restart server: tail -f $RESTART_LOG"
 echo ""
-
-# Keep the script alive so the Playwright MCP background process isn't killed.
-# The EXIT trap will clean it up when this script is interrupted (Ctrl-C / SIGTERM).
-# Note: We can't use `wait "$PLAYWRIGHT_PID"` because npx may fork and exit quickly
-# on some systems (e.g., Ubuntu), causing wait to return immediately.
-# Instead, we poll to check if something is still listening on port 8931.
-while lsof -ti :8931 >/dev/null 2>&1; do
-    sleep 5
-done
-echo "Playwright MCP server is no longer running on port 8931."
+echo "To stop all services: ./startup.sh stop"
+echo ""
+echo "You can safely disconnect the terminal now."
