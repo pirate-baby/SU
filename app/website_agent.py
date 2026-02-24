@@ -35,6 +35,7 @@ from claude_agent_sdk import (
 
 from app.config import settings
 from app.logger import get_logger
+from app.process_limiter import claude_process_slot
 from app.website_models import WEBSITE_REGISTRY
 
 log = get_logger(__name__)
@@ -220,7 +221,7 @@ async def browse_website(args: dict[str, Any]) -> dict[str, Any]:
             _emit({"type": "subagent_status", "message": f"Launching browser for {config.url}"})
             log.info("website.subagent_launching", website=website_name, url=config.url)
 
-            async with ClaudeSDKClient(options=subagent_options) as client:
+            async with claude_process_slot(timeout=150), ClaudeSDKClient(options=subagent_options) as client:
                 await client.query(prompt)
 
                 async for message in client.receive_response():

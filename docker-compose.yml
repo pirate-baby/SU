@@ -20,6 +20,7 @@ services:
       - ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID:-}
       - ELEVENLABS_TTS_MODEL=${ELEVENLABS_TTS_MODEL:-eleven_flash_v2_5}
       - SELF_ITERATION_MODE=${SELF_ITERATION_MODE:-false}
+      - MAX_CLAUDE_PROCESSES=${MAX_CLAUDE_PROCESSES:-3}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -29,6 +30,12 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+        reservations:
+          memory: 512M
     networks:
       - claude-network
 
@@ -44,6 +51,10 @@ services:
     depends_on:
       - claude-executor
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
     networks:
       - claude-network
 

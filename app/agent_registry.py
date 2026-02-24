@@ -3,6 +3,7 @@ Agent registry: keeps ClaudeChat instances alive independent of WebSocket
 connections so that sessions survive disconnects and reconnects.
 """
 import asyncio
+import os
 import time
 from typing import Optional
 
@@ -11,6 +12,7 @@ from fastapi import WebSocket
 from app.claude_client import ClaudeChat
 from app.config import settings
 from app.logger import get_logger
+from app.process_limiter import _get_semaphore, claude_process_slot
 from app.session_manager import get_session
 
 log = get_logger(__name__)
@@ -24,8 +26,9 @@ _agent_locks: dict[str, asyncio.Lock] = {}
 # Last activity timestamp per agent (monotonic clock)
 _last_activity: dict[str, float] = {}
 
-# How long (seconds) an idle agent stays alive before cleanup
-AGENT_TTL_SECONDS = 1800  # 30 minutes
+# How long (seconds) an idle agent stays alive before cleanup.
+# Keep low on constrained instances — each agent holds a process slot.
+AGENT_TTL_SECONDS = int(os.environ.get("AGENT_TTL_SECONDS", "600"))  # 10 minutes
 
 
 async def get_or_create_agent(session_id: str) -> ClaudeChat:
@@ -35,10 +38,18 @@ async def get_or_create_agent(session_id: str) -> ClaudeChat:
         log.info("registry.reuse_agent", session_id=session_id)
         return _agents[session_id]
 
-    oauth = settings.claude_code_oauth_token or None
-    claude = ClaudeChat(oauth_token=oauth)
-    await claude.connect()
+    # Acquire a process slot *before* spawning a new Claude subprocess.
+    sem = _get_semaphore()
+    await sem.acquire()
+    try:
+        oauth = settings.claude_code_oauth_token or None
+        claude = ClaudeChat(oauth_token=oauth)
+        await claude.connect()
+    except BaseException:
+        sem.release()
+        raise
 
+    # Slot stays held until release_agent() is called.
     _agents[session_id] = claude
     _agent_locks[session_id] = asyncio.Lock()
     _last_activity[session_id] = time.monotonic()
@@ -100,8 +111,13 @@ async def release_agent(session_id: str) -> None:
     _agent_locks.pop(session_id, None)
     _last_activity.pop(session_id, None)
     if claude:
-        await claude.disconnect()
-        log.info("registry.released_agent", session_id=session_id)
+        try:
+            await asyncio.wait_for(claude.disconnect(), timeout=10)
+        except (asyncio.TimeoutError, Exception):
+            log.warning("registry.disconnect_failed", session_id=session_id)
+        finally:
+            _get_semaphore().release()
+            log.info("registry.released_agent", session_id=session_id)
 
 
 async def cleanup_idle_agents() -> None:

@@ -19,6 +19,7 @@ from claude_agent_sdk import (
 from app.logger import get_logger
 from app.memory_manager import get_basic_memory_mcp_config
 from app.life_manager import life_manager_mcp_server
+from app.process_limiter import claude_process_slot
 from app.session_manager import get_session, save_message
 
 log = get_logger(__name__)
@@ -117,25 +118,26 @@ async def search_memories(session_id: str) -> Optional[str]:
     thought: Optional[str] = None
 
     log.info("subconscious.agent_starting", session_id=session_id)
-    async with ClaudeSDKClient(options=options) as client:
-        await client.query(prompt)
+    async with claude_process_slot(timeout=90):
+        async with ClaudeSDKClient(options=options) as client:
+            await client.query(prompt)
 
-        async for message in client.receive_response():
-            if isinstance(message, AssistantMessage):
-                for block in message.content:
-                    if isinstance(block, TextBlock):
-                        if thought is None:
-                            thought = block.text
-                        else:
-                            thought += block.text
-            elif isinstance(message, ResultMessage):
-                if message.is_error:
-                    log.warning(
-                        "subconscious.agent_error",
-                        session_id=session_id,
-                        result=message.result or "unknown",
-                    )
-                    return None
+            async for message in client.receive_response():
+                if isinstance(message, AssistantMessage):
+                    for block in message.content:
+                        if isinstance(block, TextBlock):
+                            if thought is None:
+                                thought = block.text
+                            else:
+                                thought += block.text
+                elif isinstance(message, ResultMessage):
+                    if message.is_error:
+                        log.warning(
+                            "subconscious.agent_error",
+                            session_id=session_id,
+                            result=message.result or "unknown",
+                        )
+                        return None
 
     if not thought or NO_MEMORY_SENTINEL in thought:
         log.info("subconscious.no_relevant_memories", session_id=session_id)

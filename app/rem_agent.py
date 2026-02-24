@@ -20,6 +20,7 @@ from claude_agent_sdk import (
 from app.logger import get_logger
 from app.memory_manager import get_basic_memory_mcp_config
 from app.life_manager import life_manager_mcp_server
+from app.process_limiter import claude_process_slot
 from app.session_manager import get_session
 
 log = get_logger(__name__)
@@ -151,17 +152,18 @@ async def consolidate_memories(session_id: str) -> None:
         system_prompt=REM_SYSTEM_PROMPT,
     )
 
-    async with ClaudeSDKClient(options=options) as client:
-        await client.query(prompt)
+    async with claude_process_slot(timeout=180):
+        async with ClaudeSDKClient(options=options) as client:
+            await client.query(prompt)
 
-        async for message in client.receive_response():
-            if isinstance(message, ResultMessage):
-                if message.is_error:
-                    log.warning(
-                        "rem.agent_error",
-                        session_id=session_id,
-                        result=message.result or "unknown",
-                    )
-                    return
+            async for message in client.receive_response():
+                if isinstance(message, ResultMessage):
+                    if message.is_error:
+                        log.warning(
+                            "rem.agent_error",
+                            session_id=session_id,
+                            result=message.result or "unknown",
+                        )
+                        return
 
     log.info("rem.completed", session_id=session_id)

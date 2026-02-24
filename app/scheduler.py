@@ -125,6 +125,7 @@ class Scheduler:
         )
         from app.memory_manager import get_basic_memory_mcp_config
         from app.life_manager import life_manager_mcp_server
+        from app.process_limiter import claude_process_slot
 
         # Build a summary of the events needing reminders
         event_summaries: list[str] = []
@@ -189,7 +190,7 @@ class Scheduler:
         )
 
         try:
-            async with ClaudeSDKClient(options=options) as client:
+            async with claude_process_slot(timeout=90), ClaudeSDKClient(options=options) as client:
                 await client.query(prompt)
                 async for message in client.receive_response():
                     if isinstance(message, ResultMessage) and message.is_error:
