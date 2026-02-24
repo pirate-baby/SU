@@ -3,8 +3,13 @@ REM agent: post-session memory consolidation.
 
 Named after REM sleep — the phase when the brain consolidates short-term
 experiences into long-term memory.  When a chat session ends, this agent
-reviews the full conversation and selectively writes noteworthy
-information to basic-memory for future recall by the Subconscious agent.
+reviews the full conversation and does two things:
+
+1. Writes narrative memories to basic-memory (semantic knowledge base)
+2. Extracts concrete tasks/events to SQLite via life_manager MCP tools
+
+This dual-write ensures that both the "soft" understanding and the
+"operational" state machine stay in sync.
 """
 from claude_agent_sdk import (
     ClaudeAgentOptions,
@@ -14,21 +19,27 @@ from claude_agent_sdk import (
 
 from app.logger import get_logger
 from app.memory_manager import get_basic_memory_mcp_config
+from app.life_manager import life_manager_mcp_server
 from app.session_manager import get_session
 
 log = get_logger(__name__)
 
 REM_SYSTEM_PROMPT = (
     "You are a memory consolidation system. You will receive a complete "
-    "conversation transcript. Your job is to identify noteworthy "
-    "information and store it in the knowledge base for future recall.\n\n"
+    "conversation transcript. Your job is to:\n\n"
+    "A) Identify noteworthy information and store it in the KNOWLEDGE BASE "
+    "(basic-memory) for future narrative recall.\n"
+    "B) Extract any concrete TASKS or EVENTS mentioned and create them in "
+    "the task/calendar system (life_manager) so they can be tracked and "
+    "reminded about.\n\n"
+
+    "== PART A: Knowledge Base (basic-memory) ==\n\n"
     "BE SELECTIVE. Not everything is worth storing. Focus on:\n"
     "- User preferences, opinions, and personal details they shared\n"
     "- Decisions made or conclusions reached\n"
     "- Technical approaches or solutions discussed\n"
     "- Project names, goals, or context established\n"
-    "- Recurring themes or interests\n"
-    "- Action items or commitments mentioned\n\n"
+    "- Recurring themes or interests\n\n"
     "DO NOT store:\n"
     "- Generic pleasantries or small talk\n"
     "- Information that is easily searchable online\n"
@@ -53,16 +64,30 @@ REM_SYSTEM_PROMPT = (
     "Use relations to link related concepts:\n"
     "  - part_of [[ShopFlow Project]]\n"
     "  - requires [[PostgreSQL Setup]]\n\n"
+
+    "== PART B: Tasks & Events (life_manager) ==\n\n"
+    "If the conversation mentioned any of the following, create them:\n"
+    "- Action items, to-dos, or things the user needs to do → use create_task\n"
+    "- Appointments, meetings, deadlines with specific dates/times → use create_event\n"
+    "- Commitments made to others → use create_task with appropriate priority\n\n"
+    "First use list_tasks to check if a similar task already exists before "
+    "creating duplicates. Set source='su_inferred' for extracted items.\n\n"
     "If the conversation had nothing noteworthy, simply do nothing — "
-    "do not create empty or trivial notes.\n\n"
+    "do not create empty or trivial notes or tasks.\n\n"
     "You are running headless. Do not ask for clarification."
 )
 
-BASIC_MEMORY_ALLOWED_TOOLS = [
+ALLOWED_TOOLS = [
+    # basic-memory tools
     "mcp__basic_memory__write_note",
     "mcp__basic_memory__edit_note",
     "mcp__basic_memory__search_notes",
     "mcp__basic_memory__read_note",
+    # life_manager tools (for task/event extraction)
+    "mcp__life_manager__create_task",
+    "mcp__life_manager__create_event",
+    "mcp__life_manager__list_tasks",
+    "mcp__life_manager__list_events",
 ]
 
 
@@ -102,14 +127,17 @@ async def consolidate_memories(session_id: str) -> None:
     )
 
     options = ClaudeAgentOptions(
-        mcp_servers={"basic_memory": get_basic_memory_mcp_config()},
-        allowed_tools=BASIC_MEMORY_ALLOWED_TOOLS,
+        mcp_servers={
+            "basic_memory": get_basic_memory_mcp_config(),
+            "life_manager": life_manager_mcp_server,
+        },
+        allowed_tools=ALLOWED_TOOLS,
         disallowed_tools=[
             "Task", "Bash", "Glob", "Grep", "Read", "Edit", "Write",
             "WebFetch", "WebSearch", "NotebookEdit",
         ],
         permission_mode="bypassPermissions",
-        max_turns=15,
+        max_turns=20,
         system_prompt=REM_SYSTEM_PROMPT,
     )
 

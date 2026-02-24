@@ -96,4 +96,80 @@ async def init_database():
             ON logs(level)
         """)
 
+        # -- Tasks (operational state for the planner) --
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS tasks (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                description TEXT,
+                status TEXT DEFAULT 'pending',
+                priority INTEGER DEFAULT 3,
+                category TEXT,
+                due_date TEXT,
+                due_time TEXT,
+                recurrence TEXT,
+                source TEXT DEFAULT 'manual',
+                source_ref TEXT,
+                parent_task_id TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                completed_at TIMESTAMP,
+                FOREIGN KEY (parent_task_id) REFERENCES tasks(id)
+            )
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_tasks_status_due
+            ON tasks(status, due_date)
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_tasks_priority
+            ON tasks(priority)
+        """)
+
+        # -- Calendar events --
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS events (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                description TEXT,
+                start_time TEXT NOT NULL,
+                end_time TEXT,
+                all_day INTEGER DEFAULT 0,
+                location TEXT,
+                recurrence TEXT,
+                source TEXT DEFAULT 'manual',
+                source_ref TEXT,
+                reminder_minutes INTEGER DEFAULT 30,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_events_start_time
+            ON events(start_time)
+        """)
+
+        # -- Interjections (SU-initiated messages queued for delivery) --
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS interjections (
+                id TEXT PRIMARY KEY,
+                content TEXT NOT NULL,
+                urgency TEXT DEFAULT 'normal',
+                source TEXT,
+                related_task_id TEXT,
+                related_event_id TEXT,
+                status TEXT DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                delivered_at TIMESTAMP
+            )
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_interjections_status
+            ON interjections(status)
+        """)
+
         await db.commit()

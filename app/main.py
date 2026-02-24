@@ -1,17 +1,22 @@
 """
-FastAPI application with Claude chat functionality.
+FastAPI application with Claude chat functionality and life management.
 """
 import asyncio
 import json
+import uuid
+from datetime import datetime
+from typing import Any
+
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from contextlib import asynccontextmanager
 import httpx
+from pydantic import BaseModel
 
 from app.config import settings
-from app.database import init_database
+from app.database import init_database, get_db
 from app.logger import get_logger, start_log_writer, stop_log_writer
 from app.session_manager import (
     create_session,
@@ -33,26 +38,81 @@ from app.agent_registry import (
     release_agent,
     cleanup_idle_agents,
 )
+from app.scheduler import scheduler
 
 log = get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# Active WebSocket connections (for interjection push delivery)
+# ---------------------------------------------------------------------------
+_active_connections: dict[str, WebSocket] = {}
+
+
+async def push_interjection_to_clients(interjection: dict[str, Any]) -> None:
+    """Push an interjection to all connected WebSocket clients."""
+    dead: list[str] = []
+    for sid, ws in _active_connections.items():
+        try:
+            await ws.send_json({
+                "type": "interjection",
+                "id": interjection["id"],
+                "content": interjection["content"],
+                "urgency": interjection.get("urgency", "normal"),
+                "source": interjection.get("source"),
+                "created_at": interjection.get("created_at"),
+            })
+        except Exception:
+            dead.append(sid)
+    for sid in dead:
+        _active_connections.pop(sid, None)
+
+
+async def deliver_pending_interjections(websocket: WebSocket) -> None:
+    """Deliver any pending interjections when a client connects."""
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT * FROM interjections WHERE status = 'pending' ORDER BY created_at ASC"
+        )
+        rows = await cursor.fetchall()
+        now = datetime.utcnow().isoformat()
+        for row in rows:
+            item = dict(row)
+            try:
+                await websocket.send_json({
+                    "type": "interjection",
+                    "id": item["id"],
+                    "content": item["content"],
+                    "urgency": item.get("urgency", "normal"),
+                    "source": item.get("source"),
+                    "created_at": item.get("created_at"),
+                })
+                await db.execute(
+                    "UPDATE interjections SET status = 'delivered', delivered_at = ? WHERE id = ?",
+                    (now, item["id"]),
+                )
+            except Exception:
+                break
+        await db.commit()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize database and log writer on startup."""
+    """Initialize database, log writer, and scheduler on startup."""
     await init_database()
     await start_log_writer()
     cleanup_task = asyncio.create_task(cleanup_idle_agents())
-    log.info("app.startup", version="2.0.0")
+    await scheduler.start(push_interjection_to_clients)
+    log.info("app.startup", version="3.0.0")
     yield
     log.info("app.shutdown")
+    await scheduler.stop()
     cleanup_task.cancel()
     await stop_log_writer()
 
 
 app = FastAPI(
-    title="Claude Chat Service",
-    version="2.0.0",
+    title="SU — Personal Assistant",
+    version="3.0.0",
     lifespan=lifespan
 )
 
@@ -205,6 +265,237 @@ async def get_voice_token(token_type: str):
         resp.raise_for_status()
         log.info("voice.token_minted", token_type=token_type)
         return resp.json()
+
+
+# ---- Planner page & Life management API ----
+
+@app.get("/planner", response_class=HTMLResponse)
+async def planner_page(request: Request):
+    """Serve the planner / calendar / task view."""
+    return templates.TemplateResponse("planner.html", {"request": request})
+
+
+# -- Tasks REST API --
+
+class TaskCreate(BaseModel):
+    title: str
+    description: str | None = None
+    priority: int = 3
+    category: str | None = None
+    due_date: str | None = None
+    due_time: str | None = None
+
+class TaskUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    status: str | None = None
+    priority: int | None = None
+    category: str | None = None
+    due_date: str | None = None
+    due_time: str | None = None
+
+
+@app.get("/api/tasks")
+async def api_list_tasks(
+    status: str | None = None,
+    category: str | None = None,
+    due_before: str | None = None,
+    due_after: str | None = None,
+    priority: int | None = None,
+    limit: int = 50,
+):
+    clauses: list[str] = []
+    params: list[Any] = []
+    if status:
+        clauses.append("status = ?")
+        params.append(status)
+    if category:
+        clauses.append("category = ?")
+        params.append(category)
+    if due_before:
+        clauses.append("due_date <= ?")
+        params.append(due_before)
+    if due_after:
+        clauses.append("due_date >= ?")
+        params.append(due_after)
+    if priority is not None:
+        clauses.append("priority = ?")
+        params.append(priority)
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    params.append(limit)
+
+    async with get_db() as db:
+        cursor = await db.execute(
+            f"SELECT * FROM tasks {where} ORDER BY priority ASC, due_date ASC LIMIT ?",
+            params,
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+
+
+@app.post("/api/tasks", status_code=201)
+async def api_create_task(body: TaskCreate):
+    task_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
+    async with get_db() as db:
+        await db.execute(
+            """INSERT INTO tasks
+               (id, title, description, priority, category, due_date, due_time,
+                created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (task_id, body.title, body.description, body.priority,
+             body.category, body.due_date, body.due_time, now, now),
+        )
+        await db.commit()
+    return {"id": task_id, "title": body.title, "status": "pending"}
+
+
+@app.put("/api/tasks/{task_id}")
+async def api_update_task(task_id: str, body: TaskUpdate):
+    sets: list[str] = []
+    vals: list[Any] = []
+    for field in ["title", "description", "status", "priority", "category",
+                  "due_date", "due_time"]:
+        val = getattr(body, field, None)
+        if val is not None:
+            sets.append(f"{field} = ?")
+            vals.append(val)
+    if not sets:
+        raise HTTPException(400, "No fields to update")
+    if body.status == "done":
+        sets.append("completed_at = ?")
+        vals.append(datetime.utcnow().isoformat())
+    sets.append("updated_at = ?")
+    vals.append(datetime.utcnow().isoformat())
+    vals.append(task_id)
+    async with get_db() as db:
+        await db.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?", vals)
+        await db.commit()
+    return {"updated": task_id}
+
+
+@app.delete("/api/tasks/{task_id}")
+async def api_delete_task(task_id: str):
+    async with get_db() as db:
+        await db.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+        await db.commit()
+    return {"deleted": task_id}
+
+
+# -- Events REST API --
+
+class EventCreate(BaseModel):
+    title: str
+    start_time: str
+    end_time: str | None = None
+    description: str | None = None
+    all_day: bool = False
+    location: str | None = None
+    reminder_minutes: int = 30
+
+class EventUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    start_time: str | None = None
+    end_time: str | None = None
+    all_day: bool | None = None
+    location: str | None = None
+    reminder_minutes: int | None = None
+
+
+@app.get("/api/events")
+async def api_list_events(
+    start_after: str | None = None,
+    start_before: str | None = None,
+    limit: int = 50,
+):
+    clauses: list[str] = []
+    params: list[Any] = []
+    if start_after:
+        clauses.append("start_time >= ?")
+        params.append(start_after)
+    if start_before:
+        clauses.append("start_time <= ?")
+        params.append(start_before)
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    params.append(limit)
+    async with get_db() as db:
+        cursor = await db.execute(
+            f"SELECT * FROM events {where} ORDER BY start_time ASC LIMIT ?",
+            params,
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+
+
+@app.post("/api/events", status_code=201)
+async def api_create_event(body: EventCreate):
+    event_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
+    async with get_db() as db:
+        await db.execute(
+            """INSERT INTO events
+               (id, title, description, start_time, end_time, all_day,
+                location, reminder_minutes, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (event_id, body.title, body.description, body.start_time,
+             body.end_time, 1 if body.all_day else 0, body.location,
+             body.reminder_minutes, now, now),
+        )
+        await db.commit()
+    return {"id": event_id, "title": body.title}
+
+
+@app.put("/api/events/{event_id}")
+async def api_update_event(event_id: str, body: EventUpdate):
+    sets: list[str] = []
+    vals: list[Any] = []
+    for field in ["title", "description", "start_time", "end_time",
+                  "all_day", "location", "reminder_minutes"]:
+        val = getattr(body, field, None)
+        if val is not None:
+            if field == "all_day":
+                val = 1 if val else 0
+            sets.append(f"{field} = ?")
+            vals.append(val)
+    if not sets:
+        raise HTTPException(400, "No fields to update")
+    sets.append("updated_at = ?")
+    vals.append(datetime.utcnow().isoformat())
+    vals.append(event_id)
+    async with get_db() as db:
+        await db.execute(f"UPDATE events SET {', '.join(sets)} WHERE id = ?", vals)
+        await db.commit()
+    return {"updated": event_id}
+
+
+@app.delete("/api/events/{event_id}")
+async def api_delete_event(event_id: str):
+    async with get_db() as db:
+        await db.execute("DELETE FROM events WHERE id = ?", (event_id,))
+        await db.commit()
+    return {"deleted": event_id}
+
+
+# -- Interjections REST API --
+
+@app.get("/api/interjections")
+async def api_list_interjections(status: str = "pending", limit: int = 20):
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT * FROM interjections WHERE status = ? ORDER BY created_at DESC LIMIT ?",
+            (status, limit),
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+
+
+@app.post("/api/interjections/{interjection_id}/dismiss")
+async def api_dismiss_interjection(interjection_id: str):
+    async with get_db() as db:
+        await db.execute(
+            "UPDATE interjections SET status = 'dismissed' WHERE id = ?",
+            (interjection_id,),
+        )
+        await db.commit()
+    return {"dismissed": interjection_id}
 
 
 # ---- WebSocket chat ----
@@ -424,6 +715,10 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
     await send_message_history(websocket, session_id)
     await update_session_activity(session_id)
 
+    # Register for interjection push delivery
+    _active_connections[session_id] = websocket
+    await deliver_pending_interjections(websocket)
+
     try:
         claude = await get_or_create_agent(session_id)
         log.info("ws.claude_initialized", session_id=session_id)
@@ -434,6 +729,7 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
             "content": f"Failed to initialize Claude client: {str(e)}"
         })
         await websocket.close()
+        _active_connections.pop(session_id, None)
         return
 
     try:
@@ -465,6 +761,8 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
             })
         except Exception:
             pass
+    finally:
+        _active_connections.pop(session_id, None)
 
 
 @app.get("/health")
@@ -472,8 +770,8 @@ async def health_check():
     """Health check endpoint."""
     return {
         "status": "healthy",
-        "service": "claude-chat-service",
-        "version": "2.0.0"
+        "service": "su-personal-assistant",
+        "version": "3.0.0"
     }
 
 
