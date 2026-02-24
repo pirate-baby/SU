@@ -39,26 +39,6 @@ services:
     networks:
       - claude-network
 
-  vibe-kanban:
-    image: node:20-alpine
-    container_name: vibe-kanban
-    command: npx -y vibe-kanban
-    environment:
-      - HOST=0.0.0.0
-      - PORT=3000
-    volumes:
-      - ${HOME}/.claude.json:/root/.claude.json:ro
-      - ${HOME}/.claude:/root/.claude:ro
-    expose:
-      - "3000"
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-    networks:
-      - claude-network
-
   nginx:
     image: nginx:alpine
     container_name: claude-nginx
@@ -73,7 +53,6 @@ services:
       - "host.docker.internal:host-gateway"
     depends_on:
       - claude-executor
-      - vibe-kanban
     restart: unless-stopped
     deploy:
       resources:

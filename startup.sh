@@ -110,6 +110,33 @@ fi
 echo "~/Repos directory secured (owner: root, mode: 700)"
 
 # ---------------------------------------------------------------------------
+# Vibe Kanban (runs on HOST so it can access git, Claude Code, etc.)
+# ---------------------------------------------------------------------------
+VK_PORT=3001
+if lsof -ti :$VK_PORT >/dev/null 2>&1; then
+    echo "Stopping existing Vibe Kanban on port $VK_PORT..."
+    lsof -ti :$VK_PORT | xargs kill -9 2>/dev/null || true
+    sleep 1
+fi
+
+# Load CLAUDE_CODE_OAUTH_TOKEN from .env if not already set
+if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] && [ -f .env ]; then
+    CLAUDE_CODE_OAUTH_TOKEN=$(grep -E '^CLAUDE_CODE_OAUTH_TOKEN=' .env | cut -d'=' -f2- | tr -d '"' | tr -d "'")
+fi
+export CLAUDE_CODE_OAUTH_TOKEN
+
+echo "Starting Vibe Kanban on host (port $VK_PORT)..."
+HOST=127.0.0.1 PORT=$VK_PORT npx -y vibe-kanban &
+VK_PID=$!
+
+sleep 3
+if ! kill -0 "$VK_PID" 2>/dev/null; then
+    echo "Error: Vibe Kanban failed to start."
+    exit 1
+fi
+echo "Vibe Kanban started (PID $VK_PID)"
+
+# ---------------------------------------------------------------------------
 # Restart server (runs on HOST so the container can trigger its own rebuild)
 # ---------------------------------------------------------------------------
 # Kill any existing restart server on port 8932
@@ -141,6 +168,12 @@ cleanup() {
     fi
     kill "$PLAYWRIGHT_PID" 2>/dev/null || true
     wait "$PLAYWRIGHT_PID" 2>/dev/null || true
+    # Stop Vibe Kanban
+    if lsof -ti :$VK_PORT >/dev/null 2>&1; then
+        lsof -ti :$VK_PORT | xargs kill 2>/dev/null || true
+    fi
+    kill "$VK_PID" 2>/dev/null || true
+    wait "$VK_PID" 2>/dev/null || true
     # Stop restart server
     if lsof -ti :8932 >/dev/null 2>&1; then
         lsof -ti :8932 | xargs kill 2>/dev/null || true
@@ -162,7 +195,7 @@ echo ""
 echo "Services started successfully!"
 echo ""
 echo "Access the chat at: http://localhost"
-echo "Vibe Kanban running on: https://localhost:53187 (Docker container via nginx)"
+echo "Vibe Kanban running on: http://localhost:53187 (host process via nginx)"
 echo "Playwright MCP server running on: http://localhost:8931/sse"
 echo "Restart server running on: http://localhost:8932/health"
 echo ""
