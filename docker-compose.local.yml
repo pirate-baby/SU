@@ -12,5 +12,6 @@ services:
       # Override with local nginx config (HTTP only, no SSL)
       - ./nginx/nginx.local.conf:/etc/nginx/nginx.conf:ro
     ports:
-      # Only expose HTTP port for local development
+      # Only expose HTTP port for local development (+ VK)
       - "80:80"
+      - "53187:53187"
