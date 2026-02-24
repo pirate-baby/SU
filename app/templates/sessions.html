@@ -117,6 +117,37 @@
         .badge-active { background: rgba(51, 255, 51, 0.1); color: var(--green); border: 1px solid #113311; }
         .badge-ended { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
 
+        .session-link {
+            color: var(--green);
+            text-decoration: none;
+            font-size: 10px;
+            font-family: var(--mono);
+            opacity: 0.7;
+            transition: opacity 0.1s;
+        }
+        .session-link:hover { opacity: 1; text-decoration: underline; }
+
+        .sidebar-actions {
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--border);
+        }
+        .btn-end-all {
+            width: 100%;
+            background: rgba(255, 51, 51, 0.08);
+            color: var(--red);
+            border: 1px solid rgba(255, 51, 51, 0.2);
+            padding: 6px 10px;
+            font-size: 11px;
+            font-family: var(--mono);
+            font-weight: 600;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            transition: background 0.1s;
+        }
+        .btn-end-all:hover { background: rgba(255, 51, 51, 0.15); }
+        .btn-end-all:disabled { opacity: 0.4; cursor: default; }
+
         /* Main panels */
         .main {
             flex: 1;
@@ -315,6 +346,9 @@
     <div class="layout">
         <div class="sidebar">
             <div class="sidebar-header">Sessions</div>
+            <div class="sidebar-actions" id="sidebar-actions" style="display: none;">
+                <button class="btn-end-all" id="end-all-btn">End All Active</button>
+            </div>
             <div class="session-list" id="session-list">
                 <div class="empty-state">Loading...</div>
             </div>
@@ -360,6 +394,8 @@
         const levelFilter = document.getElementById('level-filter');
         const logSearch = document.getElementById('log-search');
         const syncBadge = document.getElementById('sync-badge');
+        const endAllBtn = document.getElementById('end-all-btn');
+        const sidebarActions = document.getElementById('sidebar-actions');
 
         let currentSessionId = null;
         let allMessages = [];
@@ -372,19 +408,45 @@
             syncBadge.style.opacity = syncEnabled ? 1 : 0.5;
         });
 
+        endAllBtn.addEventListener('click', async () => {
+            if (!confirm('End all active sessions?')) return;
+            endAllBtn.disabled = true;
+            endAllBtn.textContent = 'Ending...';
+            try {
+                const res = await fetch('/api/sessions/end-all', { method: 'POST' });
+                const data = await res.json();
+                endAllBtn.textContent = `Ended ${data.count} session(s)`;
+                await loadSessions();
+            } catch (e) {
+                endAllBtn.textContent = 'Error';
+            }
+            setTimeout(() => {
+                endAllBtn.textContent = 'End All Active';
+                endAllBtn.disabled = false;
+            }, 2000);
+        });
+
         async function loadSessions() {
             const res = await fetch('/api/sessions');
             const sessions = await res.json();
             if (!sessions.length) {
                 sessionList.innerHTML = '<div class="empty-state">No sessions yet</div>';
+                sidebarActions.style.display = 'none';
                 return;
             }
+
+            const hasActive = sessions.some(s => s.status === 'active');
+            sidebarActions.style.display = hasActive ? '' : 'none';
+
             sessionList.innerHTML = sessions.map(s => {
                 const dt = s.last_activity ? new Date(s.last_activity) : null;
                 const timeStr = dt ? dt.toLocaleString() : '—';
                 const badgeClass = s.status === 'active' ? 'badge-active' : 'badge-ended';
+                const chatLink = s.status === 'active'
+                    ? `<a href="/chat/${s.id}" class="session-link" onclick="event.stopPropagation()">open chat &rarr;</a>`
+                    : '';
                 return `<div class="session-item" data-id="${s.id}">
-                    <div class="sid">${s.id.slice(0, 8)}</div>
+                    <div class="sid">${s.id.slice(0, 8)} ${chatLink}</div>
                     <div class="meta">
                         <span>${timeStr}</span>
                         <span class="badge ${badgeClass}">${s.status}</span>

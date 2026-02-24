@@ -153,6 +153,16 @@ async def mark_memories_consumed(message_id: int) -> None:
         await db.commit()
 
 
+async def get_active_session_ids() -> List[str]:
+    """Return IDs of all sessions with status='active'."""
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT id FROM sessions WHERE status = 'active'"
+        )
+        rows = await cursor.fetchall()
+        return [row["id"] for row in rows]
+
+
 async def session_exists(session_id: str) -> bool:
     """Check if a session exists and is active."""
     async with get_db() as db:

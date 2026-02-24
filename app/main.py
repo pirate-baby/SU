@@ -20,6 +20,7 @@ from app.session_manager import (
     create_session,
     get_session,
     get_all_sessions,
+    get_active_session_ids,
     session_exists,
     save_message,
     update_session_activity,
@@ -136,6 +137,20 @@ async def chat_page(request: Request, session_id: str):
         "chat.html",
         {"request": request, "session_id": session_id}
     )
+
+
+@app.post("/api/sessions/end-all")
+async def end_all_active_sessions():
+    """End all active sessions at once."""
+    active_ids = await get_active_session_ids()
+    ended: list[str] = []
+    for sid in active_ids:
+        await end_session(sid)
+        await release_agent(sid)
+        asyncio.ensure_future(on_session_end(sid))
+        ended.append(sid)
+    log.info("sessions.ended_all", count=len(ended))
+    return {"status": "ended", "count": len(ended), "session_ids": ended}
 
 
 @app.post("/api/sessions/{session_id}/end")
