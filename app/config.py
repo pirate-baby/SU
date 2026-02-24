@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     # User identity (one instance = one user)
-    user_name: str
+    user_name: str = "User"
     user_gender: str = "male"  # male | female | neutral
     su_name: str = "SU"
 
