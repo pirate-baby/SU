@@ -10,6 +10,11 @@ class Settings(BaseSettings):
 
     claude_code_oauth_token: Optional[str] = None
 
+    # ElevenLabs Voice Mode
+    elevenlabs_api_key: Optional[str] = None
+    elevenlabs_voice_id: Optional[str] = None
+    elevenlabs_tts_model: str = "eleven_flash_v2_5"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

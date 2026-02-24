@@ -21,12 +21,25 @@
                 <!-- Messages will be appended here -->
             </div>
 
+            <div id="voice-status" class="voice-status" style="display: none;">
+                <span id="voice-status-dot" class="voice-status-dot"></span>
+                <span id="voice-status-text" class="voice-status-text"></span>
+            </div>
+
             <div class="input-container">
                 <textarea
                     id="message-input"
                     placeholder="Type your message..."
                     rows="3"
                 ></textarea>
+                <button id="voice-btn" class="voice-btn" title="Tap to speak" style="display: none;">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                        <line x1="12" y1="19" x2="12" y2="23"/>
+                        <line x1="8" y1="23" x2="16" y2="23"/>
+                    </svg>
+                </button>
                 <button id="send-btn" class="primary-btn">Send</button>
             </div>
 
@@ -37,6 +50,7 @@
     <script>
         const SESSION_ID = "{{ session_id }}";
     </script>
+    <script src="/static/js/voice.js"></script>
     <script src="/static/js/chat.js"></script>
 </body>
 </html>

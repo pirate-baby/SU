@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from contextlib import asynccontextmanager
+import httpx
 
 from app.config import settings
 from app.database import init_database
@@ -169,6 +170,33 @@ async def get_logs(
         return [dict(row) for row in rows]
 
 
+# ---- Voice mode API routes ----
+
+@app.get("/api/voice/config")
+async def get_voice_config():
+    """Return voice mode configuration."""
+    return {"enabled": bool(settings.elevenlabs_api_key and settings.elevenlabs_voice_id)}
+
+
+@app.get("/api/voice/token/{token_type}")
+async def get_voice_token(token_type: str):
+    """Mint a single-use token for client-side ElevenLabs access."""
+    if not settings.elevenlabs_api_key:
+        raise HTTPException(status_code=503, detail="Voice mode not configured")
+    if token_type not in ("stt", "tts"):
+        raise HTTPException(status_code=400, detail="Invalid token type")
+
+    el_token_type = "realtime_scribe" if token_type == "stt" else "tts_websocket"
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"https://api.elevenlabs.io/v1/single-use-token/{el_token_type}",
+            headers={"xi-api-key": settings.elevenlabs_api_key},
+        )
+        resp.raise_for_status()
+        log.info("voice.token_minted", token_type=token_type)
+        return resp.json()
+
+
 # ---- WebSocket chat ----
 
 async def send_message_history(websocket: WebSocket, session_id: str):
@@ -204,7 +232,23 @@ async def _drain_subagent_events(websocket: WebSocket, stop: asyncio.Event):
     log.debug("drain.stopped")
 
 
-async def stream_claude_response(websocket: WebSocket, session_id: str, user_message: str, claude: ClaudeChat):
+async def _forward_tts_audio(tts, websocket: WebSocket, session_id: str):
+    """Read audio chunks from TTS and forward over the app WebSocket."""
+    chunks_forwarded = 0
+    try:
+        async for audio_b64 in tts.audio_chunks():
+            await websocket.send_json({
+                "type": "audio_chunk",
+                "audio": audio_b64,
+            })
+            chunks_forwarded += 1
+    except Exception:
+        log.exception("tts.forward_error", session_id=session_id, chunks_forwarded=chunks_forwarded)
+    log.info("tts.forward_done", session_id=session_id, chunks_forwarded=chunks_forwarded)
+    await websocket.send_json({"type": "audio_end"})
+
+
+async def stream_claude_response(websocket: WebSocket, session_id: str, user_message: str, claude: ClaudeChat, voice_mode: bool = False):
     await websocket.send_json({"type": "assistant_start"})
 
     # Drain any stale events from a previous call
@@ -217,6 +261,19 @@ async def stream_claude_response(websocket: WebSocket, session_id: str, user_mes
     stop_drain = asyncio.Event()
     drain_task = asyncio.create_task(_drain_subagent_events(websocket, stop_drain))
 
+    # Set up TTS if voice mode is active
+    tts = None
+    tts_forwarder = None
+    if voice_mode and settings.elevenlabs_api_key:
+        from app.elevenlabs_tts import ElevenLabsTTS
+        tts = ElevenLabsTTS()
+        try:
+            await tts.connect()
+            tts_forwarder = asyncio.create_task(_forward_tts_audio(tts, websocket, session_id))
+        except Exception:
+            log.exception("tts.connect_failed", session_id=session_id)
+            tts = None
+
     full_response = ""
     try:
         async for event in claude.send_message(user_message):
@@ -228,6 +285,8 @@ async def stream_claude_response(websocket: WebSocket, session_id: str, user_mes
                     "type": "assistant_chunk",
                     "content": event["content"]
                 })
+                if tts:
+                    await tts.send_text(event["content"])
             elif event_type == "tool_use":
                 log.info(
                     "chat.tool_use",
@@ -264,6 +323,16 @@ async def stream_claude_response(websocket: WebSocket, session_id: str, user_mes
         stop_drain.set()
         await drain_task
 
+    # Finalize TTS
+    if tts:
+        try:
+            await tts.flush()
+            await tts.close()
+        except Exception:
+            log.exception("tts.close_error", session_id=session_id)
+        if tts_forwarder:
+            await tts_forwarder
+
     await save_message(session_id, "assistant", full_response)
     log.info("chat.assistant_response", session_id=session_id, length=len(full_response))
     await websocket.send_json({"type": "assistant_end"})
@@ -295,9 +364,9 @@ async def _inject_pending_memories(session_id: str, claude: ClaudeChat) -> None:
     log.info("memory.injected", session_id=session_id, count=len(pending))
 
 
-async def handle_user_message(websocket: WebSocket, session_id: str, user_message: str, claude: ClaudeChat):
+async def handle_user_message(websocket: WebSocket, session_id: str, user_message: str, claude: ClaudeChat, voice_mode: bool = False):
     await save_message(session_id, "user", user_message)
-    log.info("chat.user_message", session_id=session_id, length=len(user_message))
+    log.info("chat.user_message", session_id=session_id, length=len(user_message), voice_mode=voice_mode)
     asyncio.ensure_future(on_user_message(session_id))
     await websocket.send_json({
         "type": "user_message",
@@ -306,7 +375,7 @@ async def handle_user_message(websocket: WebSocket, session_id: str, user_messag
 
     try:
         await _inject_pending_memories(session_id, claude)
-        await stream_claude_response(websocket, session_id, user_message, claude)
+        await stream_claude_response(websocket, session_id, user_message, claude, voice_mode=voice_mode)
     except Exception as e:
         log.exception("chat.handle_error", session_id=session_id, error=str(e))
         await websocket.send_json({
@@ -362,10 +431,15 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
                 data = await websocket.receive_text()
                 message_data = json.loads(data)
 
-                if message_data.get("type") == "user_message":
+                msg_type = message_data.get("type")
+                if msg_type == "user_message":
                     user_message = message_data.get("content", "").strip()
                     if user_message:
                         await handle_user_message(websocket, session_id, user_message, claude)
+                elif msg_type == "voice_message":
+                    user_message = message_data.get("content", "").strip()
+                    if user_message:
+                        await handle_user_message(websocket, session_id, user_message, claude, voice_mode=True)
 
     except WebSocketDisconnect:
         log.info("ws.disconnected", session_id=session_id)

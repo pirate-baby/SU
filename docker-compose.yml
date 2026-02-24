@@ -15,6 +15,9 @@ services:
       - PYTHONUNBUFFERED=1
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
       - DATABASE_PATH=/data/sessions.db
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
+      - ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID:-}
+      - ELEVENLABS_TTS_MODEL=${ELEVENLABS_TTS_MODEL:-eleven_flash_v2_5}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped

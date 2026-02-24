@@ -25,6 +25,22 @@ function connect() {
         setStatus('Connected', 'success');
         reconnectAttempts = 0;
         enableInput();
+
+        // Initialize voice mode
+        if (typeof voiceMode !== 'undefined') {
+            voiceMode.init();
+            // Callback for voice mode to send transcribed text
+            window._voiceSendMessage = (text) => {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({
+                        type: 'voice_message',
+                        content: text,
+                        session_id: SESSION_ID,
+                    }));
+                    disableInput();
+                }
+            };
+        }
     };
 
     ws.onmessage = (event) => {
@@ -92,6 +108,14 @@ function handleMessage(data) {
 
         case 'assistant_end':
             finalizeAssistantMessage();
+            break;
+
+        case 'audio_chunk':
+            if (typeof voiceMode !== 'undefined') voiceMode.handleAudioChunk(data.audio);
+            break;
+
+        case 'audio_end':
+            if (typeof voiceMode !== 'undefined') voiceMode.handleAudioEnd();
             break;
 
         case 'error':
