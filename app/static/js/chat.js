@@ -131,6 +131,10 @@ function handleMessage(data) {
             appendMessage('system', 'SU is restarting to apply code changes. The session will resume automatically.', false);
             break;
 
+        case 'interjection':
+            appendInterjection(data);
+            break;
+
         case 'status':
             setStatus(data.content, 'info');
             break;
@@ -439,6 +443,28 @@ function appendMessage(role, content, isError = false) {
     contentDiv.className = 'message-content';
     contentDiv.textContent = content;
 
+    messageDiv.appendChild(contentDiv);
+    messagesContainer.appendChild(messageDiv);
+    scrollToBottom();
+}
+
+function appendInterjection(data) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'message assistant interjection';
+
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content interjection-content';
+
+    const label = document.createElement('div');
+    label.className = 'interjection-label';
+    label.textContent = 'SU';
+
+    const text = document.createElement('div');
+    text.className = 'interjection-text';
+    text.textContent = data.content;
+
+    contentDiv.appendChild(label);
+    contentDiv.appendChild(text);
     messageDiv.appendChild(contentDiv);
     messagesContainer.appendChild(messageDiv);
     scrollToBottom();
