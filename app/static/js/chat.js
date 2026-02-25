@@ -107,6 +107,19 @@ function connect() {
     };
 }
 
+// When the page becomes visible again (returning from background on mobile),
+// the WebSocket and its reconnect timers may have been frozen/killed.
+// Force an immediate reconnect if the socket is not open.
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+            console.log('Page visible again — reconnecting WebSocket');
+            reconnectAttempts = 0;
+            connect();
+        }
+    }
+});
+
 function handleMessage(data) {
     switch (data.type) {
         case 'history':
