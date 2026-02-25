@@ -77,17 +77,17 @@ function connect() {
         console.log('WebSocket closed');
         disableInput();
 
-        // If the connection closed very quickly (< 1s) without ever reaching onopen,
+        // If the connection closed without ever reaching onopen,
         // it is likely a TLS/SSL handshake failure (e.g. self-signed cert on mobile).
         const elapsed = connectStartTime ? Date.now() - connectStartTime : 9999;
-        if (!didOpen && elapsed < 1000) {
+        if (!didOpen && elapsed < 10000) {
             consecutiveImmediateFailures++;
         } else {
             consecutiveImmediateFailures = 0;
         }
 
         if (consecutiveImmediateFailures >= 2) {
-            setStatus('Cannot connect — SSL certificate not trusted by this browser. Open the site URL in a new tab, accept the security warning, then return here.', 'error');
+            setStatus('Cannot connect — SSL certificate not trusted by this browser. Open the site URL directly, accept the security warning, then return here and reload.', 'error');
             return;
         }
 

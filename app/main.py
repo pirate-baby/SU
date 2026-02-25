@@ -115,6 +115,13 @@ app = FastAPI(
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
 
+# Cache-busting version for static assets — updated on each deploy
+import subprocess as _sp
+_STATIC_VERSION = _sp.run(
+    ["git", "rev-parse", "--short", "HEAD"],
+    capture_output=True, text=True
+).stdout.strip() or "1"
+
 
 @app.get("/", response_class=HTMLResponse)
 async def landing_page(request: Request):
@@ -141,7 +148,7 @@ async def chat_page(request: Request, session_id: str):
 
     return templates.TemplateResponse(
         "chat.html",
-        {"request": request, "session_id": session_id}
+        {"request": request, "session_id": session_id, "static_v": _STATIC_VERSION}
     )
 
 
