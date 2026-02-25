@@ -23,6 +23,7 @@ services:
       - USER_NAME=${USER_NAME:-}
       - SELF_ITERATION_MODE=${SELF_ITERATION_MODE:-false}
       - MAX_CLAUDE_PROCESSES=${MAX_CLAUDE_PROCESSES:-3}
+      - PLAYWRIGHT_MCP_URL=${PLAYWRIGHT_MCP_URL:-http://host.docker.internal:8931/sse}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped

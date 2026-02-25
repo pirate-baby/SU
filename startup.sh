@@ -82,38 +82,52 @@ if [ -z "$NODE_VERSION" ] || [ "$NODE_VERSION" -lt 18 ]; then
     exit 1
 fi
 
-echo "Starting Playwright MCP server on host (port 8931) in extension mode..."
-# --extension      : connect to the existing browser via the Playwright MCP
-#   Bridge extension instead of launching a new instance. This avoids profile
-#   lock conflicts and about:blank issues with launchPersistentContext.
-# --host 0.0.0.0   : accept connections from Docker containers
-# --allowed-hosts *: disable the Host-header check so that requests arriving
-#   with "Host: host.docker.internal:8931" (from inside Docker) are not rejected.
 # Load PLAYWRIGHT_MCP_EXTENSION_TOKEN from .env if not already set
 if [ -z "$PLAYWRIGHT_MCP_EXTENSION_TOKEN" ]; then
     if [ -f "$SCRIPT_DIR/.env" ]; then
         PLAYWRIGHT_MCP_EXTENSION_TOKEN=$(grep -E '^PLAYWRIGHT_MCP_EXTENSION_TOKEN=' "$SCRIPT_DIR/.env" | cut -d'=' -f2- | tr -d '"' | tr -d "'")
     fi
-    if [ -z "$PLAYWRIGHT_MCP_EXTENSION_TOKEN" ]; then
-        echo "Error: PLAYWRIGHT_MCP_EXTENSION_TOKEN is not set."
-        echo "Set it in .env or export it before running this script."
-        exit 1
-    fi
 fi
 export PLAYWRIGHT_MCP_EXTENSION_TOKEN
+
 PLAYWRIGHT_LOG="$LOG_DIR/playwright-mcp.log"
-nohup npx -y @playwright/mcp@latest \
-    --extension \
-    --host 0.0.0.0 \
-    --allowed-hosts '*' \
-    --port 8931 > "$PLAYWRIGHT_LOG" 2>&1 &
+if [ -n "$PLAYWRIGHT_MCP_EXTENSION_TOKEN" ]; then
+    # --extension      : connect to the existing browser via the Playwright MCP
+    #   Bridge extension instead of launching a new instance. This avoids profile
+    #   lock conflicts and about:blank issues with launchPersistentContext.
+    # --host 0.0.0.0   : accept connections from Docker containers
+    # --allowed-hosts *: disable the Host-header check so that requests arriving
+    #   with "Host: host.docker.internal:8931" (from inside Docker) are not rejected.
+    #
+    # DISPLAY: extension mode spawns Chrome to deliver the relay URL to the
+    # extension. On DCV/headless EC2 the shell may not have DISPLAY set even
+    # though Xorg is running on :0 — export it so Chrome can open the page.
+    export DISPLAY="${DISPLAY:-:0}"
+    echo "Starting Playwright MCP server on host (port 8931) in extension mode (DISPLAY=$DISPLAY)..."
+    nohup npx -y @playwright/mcp@latest \
+        --extension \
+        --host 0.0.0.0 \
+        --allowed-hosts '*' \
+        --port 8931 > "$PLAYWRIGHT_LOG" 2>&1 &
+else
+    # No extension token — fall back to headless mode (launches its own browser).
+    # Useful for CI environments or when the Chrome extension isn't available.
+    echo "PLAYWRIGHT_MCP_EXTENSION_TOKEN not set — starting Playwright MCP in headless mode..."
+    nohup npx -y @playwright/mcp@latest \
+        --headless \
+        --host 0.0.0.0 \
+        --allowed-hosts '*' \
+        --port 8931 > "$PLAYWRIGHT_LOG" 2>&1 &
+fi
 PLAYWRIGHT_PID=$!
 
 # Wait briefly and verify the process is still running
 sleep 2
 if ! kill -0 "$PLAYWRIGHT_PID" 2>/dev/null; then
     echo "Error: Playwright MCP server failed to start. Check $PLAYWRIGHT_LOG"
-    echo "Make sure Chrome is running and the Playwright MCP Bridge extension is installed."
+    if [ -n "$PLAYWRIGHT_MCP_EXTENSION_TOKEN" ]; then
+        echo "Make sure Chrome is running and the Playwright MCP Bridge extension is installed."
+    fi
     exit 1
 fi
 echo "Playwright MCP server started (PID $PLAYWRIGHT_PID), logs at $PLAYWRIGHT_LOG"
