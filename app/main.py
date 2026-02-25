@@ -643,6 +643,8 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
     _active_connections[session_id] = websocket
     await deliver_pending_interjections(websocket)
 
+    await websocket.send_json({"type": "status", "content": "Initializing..."})
+
     try:
         claude = await get_or_create_agent(session_id)
         log.info("ws.claude_initialized", session_id=session_id)
@@ -655,6 +657,8 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
         await websocket.close()
         _active_connections.pop(session_id, None)
         return
+
+    await websocket.send_json({"type": "connection_ready"})
 
     try:
         while True:

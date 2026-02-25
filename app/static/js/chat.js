@@ -4,6 +4,10 @@ const MAX_RECONNECT_ATTEMPTS = 60;
 const RECONNECT_DELAY = 2000;
 const MAX_RECONNECT_DELAY = 10000;
 
+// Track rapid connection failures (never reached onopen) to detect SSL issues
+let connectStartTime = null;
+let consecutiveImmediateFailures = 0;
+
 const messagesContainer = document.getElementById('messages');
 const messageInput = document.getElementById('message-input');
 const sendBtn = document.getElementById('send-btn');
@@ -26,14 +30,17 @@ function renderMarkdown(text) {
 
 function connect() {
     setStatus('Connecting...', 'warning');
+    connectStartTime = Date.now();
+    let didOpen = false;
 
     ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
         console.log('WebSocket connected');
-        setStatus('Connected', 'success');
+        didOpen = true;
+        consecutiveImmediateFailures = 0;
         reconnectAttempts = 0;
-        enableInput();
+        setStatus('Initializing...', 'warning');
 
         // Initialize voice mode
         if (typeof voiceMode !== 'undefined') {
@@ -68,8 +75,23 @@ function connect() {
 
     ws.onclose = () => {
         console.log('WebSocket closed');
-        setStatus('Disconnected', 'error');
         disableInput();
+
+        // If the connection closed very quickly (< 1s) without ever reaching onopen,
+        // it is likely a TLS/SSL handshake failure (e.g. self-signed cert on mobile).
+        const elapsed = connectStartTime ? Date.now() - connectStartTime : 9999;
+        if (!didOpen && elapsed < 1000) {
+            consecutiveImmediateFailures++;
+        } else {
+            consecutiveImmediateFailures = 0;
+        }
+
+        if (consecutiveImmediateFailures >= 2) {
+            setStatus('Cannot connect — SSL certificate not trusted by this browser. Open the site URL in a new tab, accept the security warning, then return here.', 'error');
+            return;
+        }
+
+        setStatus('Disconnected', 'error');
 
         if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
             reconnectAttempts++;
@@ -131,6 +153,11 @@ function handleMessage(data) {
 
         case 'error':
             appendMessage('system', `Error: ${data.content}`, true);
+            enableInput();
+            break;
+
+        case 'connection_ready':
+            setStatus('Connected', 'success');
             enableInput();
             break;
 
