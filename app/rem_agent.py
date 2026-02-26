@@ -12,9 +12,12 @@ This dual-write ensures that both the "soft" understanding and the
 "operational" state machine stay in sync.
 """
 from claude_agent_sdk import (
+    AssistantMessage,
     ClaudeAgentOptions,
     ClaudeSDKClient,
     ResultMessage,
+    TextBlock,
+    ToolUseBlock,
 )
 
 from app.config import settings
@@ -161,7 +164,22 @@ async def consolidate_memories(session_id: str) -> None:
             await client.query(prompt)
 
             async for message in client.receive_response():
-                if isinstance(message, ResultMessage):
+                if isinstance(message, AssistantMessage):
+                    for block in message.content:
+                        if isinstance(block, ToolUseBlock) and block.name in (
+                            "mcp__basic_memory__write_note",
+                            "mcp__basic_memory__edit_note",
+                        ):
+                            title = block.input.get("title", "?")
+                            content = block.input.get("content", "")
+                            log.info(
+                                "rem.memory_write",
+                                session_id=session_id,
+                                tool=block.name.split("__")[-1],
+                                title=title,
+                                lines=len(content.splitlines()),
+                            )
+                elif isinstance(message, ResultMessage):
                     if message.is_error:
                         log.warning(
                             "rem.agent_error",

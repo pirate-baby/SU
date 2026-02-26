@@ -3,7 +3,7 @@ FastAPI application with Claude chat functionality and life management.
 """
 import asyncio
 import json
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse
@@ -99,6 +99,16 @@ async def lifespan(app: FastAPI):
     cleanup_task = asyncio.create_task(cleanup_idle_agents())
     await scheduler.start(push_interjection_to_clients)
     log.info("app.startup", version="3.0.0")
+
+    # Trigger REM for any sessions that were still active at shutdown
+    # (e.g. tab closed, process killed) so their memories are not lost.
+    abandoned = await get_active_session_ids()
+    if abandoned:
+        log.info("app.startup_rem_sweep", count=len(abandoned))
+        for sid in abandoned:
+            await end_session(sid)
+            asyncio.ensure_future(on_session_end(sid))
+
     yield
     log.info("app.shutdown")
     await scheduler.stop()
@@ -571,23 +581,24 @@ async def stream_claude_response(websocket: WebSocket, session_id: str, user_mes
         log.warning("chat.ws_disconnected_during_stream", session_id=session_id)
 
 
-async def _inject_pending_memories(session_id: str, claude: ClaudeChat) -> None:
-    """Feed any pending memory thoughts into the SDK client's internal history."""
+async def _collect_and_consume_memories(session_id: str) -> Optional[str]:
+    """Collect pending memory thoughts, mark them consumed, and return as a context string.
+
+    Returns a formatted <context>...</context> string to prepend to the user message,
+    or None if there are no pending memories.
+    """
     session = await get_session(session_id)
     if not session or not session.messages:
-        return
+        return None
 
     pending = [m for m in session.messages if m.role == "memory"]
     if not pending:
-        return
+        return None
 
     thoughts = "\n\n".join(m.content for m in pending)
-    context_msg = f"<context>\n{thoughts}\n</context>"
+    context_prefix = f"<context>\n{thoughts}\n</context>\n\n"
 
     log.info("memory.injecting", session_id=session_id, count=len(pending))
-
-    async for _ in claude.send_message(context_msg):
-        pass
 
     from app.session_manager import mark_memories_consumed
     for m in pending:
@@ -595,6 +606,7 @@ async def _inject_pending_memories(session_id: str, claude: ClaudeChat) -> None:
             await mark_memories_consumed(m.id)
 
     log.info("memory.injected", session_id=session_id, count=len(pending))
+    return context_prefix
 
 
 async def handle_user_message(websocket: WebSocket, session_id: str, user_message: str, claude: ClaudeChat, voice_mode: bool = False):
@@ -616,8 +628,9 @@ async def handle_user_message(websocket: WebSocket, session_id: str, user_messag
         asyncio.ensure_future(on_user_message(session_id))
 
     try:
-        await _inject_pending_memories(session_id, claude)
-        await stream_claude_response(websocket, session_id, user_message, claude, voice_mode=voice_mode)
+        context_prefix = await _collect_and_consume_memories(session_id)
+        effective_message = (context_prefix + user_message) if context_prefix else user_message
+        await stream_claude_response(websocket, session_id, effective_message, claude, voice_mode=voice_mode)
     except Exception as e:
         log.exception("chat.handle_error", session_id=session_id, error=str(e))
         await _ws_send(websocket, {

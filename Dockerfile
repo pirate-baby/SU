@@ -15,9 +15,7 @@ RUN apt-get update && apt-get install -y \
 
 # Copy UV from official image (no pip needed!)
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
-
-# Install basic-memory MCP server
-RUN uv tool install basic-memory
+COPY --from=ghcr.io/astral-sh/uv:latest /uvx /usr/local/bin/uvx
 
 # Pre-cache protonmail-mcp-server so it's available offline at runtime
 # The npm package ships pre-compiled dist/ — no build step needed.
@@ -48,6 +46,9 @@ RUN git config --global user.email "su@localhost" && \
 
 # Switch to non-root user
 USER appuser
+
+# Install basic-memory MCP server as appuser so uvx can find it at runtime
+RUN uv tool install basic-memory
 
 # Expose port
 EXPOSE 8000

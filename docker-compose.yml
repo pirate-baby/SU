@@ -15,6 +15,7 @@ services:
       - .:/src
     environment:
       - PYTHONUNBUFFERED=1
+      - BASIC_MEMORY_CONFIG_DIR=/home/appuser/basic-memory
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
       - DATABASE_PATH=/data/sessions.db
       - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
