@@ -27,7 +27,7 @@ from app.session_manager import (
     end_session,
 )
 from app.claude_client import ClaudeChat
-from app.memory_manager import on_user_message, on_session_end
+from app.memory_manager import on_first_message, on_user_message, on_session_end
 from app.models import SessionCreateResponse
 from app.agent_registry import (
     get_or_create_agent,
@@ -600,11 +600,20 @@ async def _inject_pending_memories(session_id: str, claude: ClaudeChat) -> None:
 async def handle_user_message(websocket: WebSocket, session_id: str, user_message: str, claude: ClaudeChat, voice_mode: bool = False):
     await save_message(session_id, "user", user_message)
     log.info("chat.user_message", session_id=session_id, length=len(user_message), voice_mode=voice_mode)
-    asyncio.ensure_future(on_user_message(session_id))
     await websocket.send_json({
         "type": "user_message",
         "content": user_message
     })
+
+    # For the very first user message, run the subconscious immediately (await)
+    # so any surfaced memories are ready before we start generating. For subsequent
+    # messages, fire it in the background on the usual interval.
+    session = await get_session(session_id)
+    user_messages = [m for m in (session.messages if session else []) if m.role == "user"]
+    if len(user_messages) == 1:
+        await on_first_message(session_id)
+    else:
+        asyncio.ensure_future(on_user_message(session_id))
 
     try:
         await _inject_pending_memories(session_id, claude)

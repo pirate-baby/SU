@@ -34,10 +34,21 @@ def get_basic_memory_mcp_config() -> dict:
 # Public hooks called from main.py
 # ---------------------------------------------------------------------------
 
+async def on_first_message(session_id: str) -> None:
+    """Await a subconscious run immediately before the first response.
+
+    Called synchronously (not fire-and-forget) so that any surfaced memory
+    is available for injection before the agent starts generating.
+    """
+    _session_counters[session_id] = 1
+    log.info("memory.subconscious_immediate", session_id=session_id)
+    await _run_subconscious(session_id)
+
+
 async def on_user_message(session_id: str) -> None:
-    """Called after each user message is saved."""
-    _session_counters[session_id] = _session_counters.get(session_id, 0) + 1
-    count = _session_counters[session_id]
+    """Called after each user message is saved (message 2+)."""
+    count = _session_counters.get(session_id, 0) + 1
+    _session_counters[session_id] = count
     log.debug("memory.message_count", session_id=session_id, count=count)
 
     if count % SUBCONSCIOUS_INTERVAL == 0:
