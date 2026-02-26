@@ -19,11 +19,9 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 # Install basic-memory MCP server
 RUN uv tool install basic-memory
 
-# Install protonmail-pro-mcp (email management via ProtonMail/Proton Bridge)
-RUN git clone https://github.com/anyrxo/protonmail-pro-mcp /opt/protonmail-pro-mcp \
-    && cd /opt/protonmail-pro-mcp \
-    && npm install \
-    && npm run build
+# Pre-cache protonmail-mcp-server so it's available offline at runtime
+# The npm package ships pre-compiled dist/ — no build step needed.
+RUN npm install -g protonmail-mcp-server
 
 # Copy dependency files
 COPY pyproject.toml uv.lock ./

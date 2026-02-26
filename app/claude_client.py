@@ -157,8 +157,8 @@ class ClaudeChat:
         if settings.protonmail_username and settings.protonmail_password:
             mcp_servers["protonmail"] = {
                 "type": "stdio",
-                "command": "node",
-                "args": ["/opt/protonmail-pro-mcp/dist/index.js"],
+                "command": "protonmail-mcp-server",
+                "args": [],
                 "env": {
                     "PROTONMAIL_USERNAME": settings.protonmail_username,
                     "PROTONMAIL_PASSWORD": settings.protonmail_password,
