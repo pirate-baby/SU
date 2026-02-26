@@ -25,6 +25,10 @@
                 </div>
                 <div class="header-actions">
                     <span class="session-id">Session: {{ session_id[:8] }}</span>
+                    <label class="amnesia-toggle" title="Skip REM memory consolidation when ending this session">
+                        <input type="checkbox" id="amnesia-checkbox">
+                        <span class="amnesia-label">amnesia</span>
+                    </label>
                     <button id="end-session-btn" class="danger-btn">End</button>
                 </div>
             </div>

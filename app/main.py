@@ -167,15 +167,16 @@ async def end_all_active_sessions():
 
 
 @app.post("/api/sessions/{session_id}/end")
-async def end_chat_session(session_id: str):
-    """End a chat session."""
+async def end_chat_session(session_id: str, skip_rem: bool = False):
+    """End a chat session. Pass skip_rem=true to suppress REM memory consolidation."""
     if not await session_exists(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
 
     await end_session(session_id)
     await release_agent(session_id)
-    log.info("session.ended", session_id=session_id)
-    asyncio.ensure_future(on_session_end(session_id))
+    log.info("session.ended", session_id=session_id, skip_rem=skip_rem)
+    if not skip_rem:
+        asyncio.ensure_future(on_session_end(session_id))
     return {"status": "ended"}
 
 

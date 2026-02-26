@@ -588,8 +588,12 @@ async function endSession() {
         return;
     }
 
+    const amnesiaCheckbox = document.getElementById('amnesia-checkbox');
+    const skipRem = amnesiaCheckbox && amnesiaCheckbox.checked;
+
     try {
-        const response = await fetch(`/api/sessions/${SESSION_ID}/end`, {
+        const url = `/api/sessions/${SESSION_ID}/end${skipRem ? '?skip_rem=true' : ''}`;
+        const response = await fetch(url, {
             method: 'POST'
         });
 

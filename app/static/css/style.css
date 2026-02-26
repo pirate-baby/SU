@@ -192,6 +192,60 @@ body {
     font-family: var(--mono);
 }
 
+.amnesia-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.amnesia-toggle input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    border: 1px solid var(--text-muted);
+    background: transparent;
+    cursor: pointer;
+    flex-shrink: 0;
+    position: relative;
+    transition: border-color 0.15s;
+}
+
+.amnesia-toggle input[type="checkbox"]:checked {
+    border-color: var(--red);
+    background: rgba(255, 51, 51, 0.15);
+}
+
+.amnesia-toggle input[type="checkbox"]:checked::after {
+    content: '\2715';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: var(--red);
+    font-size: 10px;
+    line-height: 1;
+}
+
+.amnesia-toggle:hover input[type="checkbox"] {
+    border-color: var(--red);
+}
+
+.amnesia-label {
+    font-size: 0.75em;
+    color: var(--text-muted);
+    font-family: var(--mono);
+    letter-spacing: 0.05em;
+    transition: color 0.15s;
+}
+
+.amnesia-toggle:hover .amnesia-label,
+.amnesia-toggle input[type="checkbox"]:checked ~ .amnesia-label {
+    color: var(--red);
+}
+
 /* Messages Container */
 .messages-container {
     flex: 1;
