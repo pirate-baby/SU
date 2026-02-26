@@ -112,12 +112,26 @@ async def release_agent(session_id: str) -> None:
     _last_activity.pop(session_id, None)
     if claude:
         try:
-            await asyncio.wait_for(claude.disconnect(), timeout=10)
-        except (asyncio.TimeoutError, Exception):
+            # Shield the disconnect so any internal CancelledError from
+            # asyncio.wait_for does not propagate to the calling task.
+            await asyncio.shield(asyncio.wait_for(claude.disconnect(), timeout=10))
+        except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
             log.warning("registry.disconnect_failed", session_id=session_id)
         finally:
             _get_semaphore().release()
             log.info("registry.released_agent", session_id=session_id)
+
+
+# Set of session IDs with an active WebSocket connection (maintained by main.py).
+_active_ws: set[str] = set()
+
+
+def mark_ws_connected(session_id: str) -> None:
+    _active_ws.add(session_id)
+
+
+def mark_ws_disconnected(session_id: str) -> None:
+    _active_ws.discard(session_id)
 
 
 async def cleanup_idle_agents() -> None:
@@ -128,7 +142,7 @@ async def cleanup_idle_agents() -> None:
         now = time.monotonic()
         stale = [
             sid for sid, ts in _last_activity.items()
-            if now - ts > AGENT_TTL_SECONDS
+            if now - ts > AGENT_TTL_SECONDS and sid not in _active_ws
         ]
         for sid in stale:
             log.info("registry.cleanup_idle", session_id=sid)

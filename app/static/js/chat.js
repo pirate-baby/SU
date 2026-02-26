@@ -184,7 +184,12 @@ function handleMessage(data) {
             break;
 
         case 'status':
-            setStatus(data.content, 'info');
+            if (data.content) {
+                setStatus(data.content, data.persist ? 'warning' : 'info');
+            } else {
+                statusIndicator.textContent = '';
+                statusIndicator.className = 'status-indicator';
+            }
             break;
     }
 }

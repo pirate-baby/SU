@@ -35,6 +35,8 @@ from app.agent_registry import (
     touch,
     release_agent,
     cleanup_idle_agents,
+    mark_ws_connected,
+    mark_ws_disconnected,
 )
 from app.scheduler import scheduler
 from app.repositories import TaskRepo, EventRepo, InterjectionRepo, PushSubscriptionRepo
@@ -623,7 +625,9 @@ async def handle_user_message(websocket: WebSocket, session_id: str, user_messag
     session = await get_session(session_id)
     user_messages = [m for m in (session.messages if session else []) if m.role == "user"]
     if len(user_messages) == 1:
+        await _ws_send(websocket, {"type": "status", "content": "...", "persist": True})
         await on_first_message(session_id)
+        await _ws_send(websocket, {"type": "status", "content": ""})
     else:
         asyncio.ensure_future(on_user_message(session_id))
 
@@ -671,6 +675,7 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
 
     # Register for interjection push delivery
     _active_connections[session_id] = websocket
+    mark_ws_connected(session_id)
     await deliver_pending_interjections(websocket)
 
     await websocket.send_json({"type": "status", "content": "Initializing..."})
@@ -721,6 +726,7 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
             pass
     finally:
         _active_connections.pop(session_id, None)
+        mark_ws_disconnected(session_id)
 
 
 @app.post("/api/admin/update")
