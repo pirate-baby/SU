@@ -12,7 +12,13 @@ LOG_DIR="/tmp"
 if [ "${1:-}" = "stop" ]; then
     echo "Stopping Claude Chat Service..."
 
-    # Stop host-side processes by port
+    # Stop Vibe Kanban systemd scope (and all child Claude Code processes)
+    if systemctl --user is-active vibe-kanban.scope &>/dev/null 2>&1; then
+        echo "  Stopping vibe-kanban.scope (and all Claude Code children)..."
+        systemctl --user stop vibe-kanban.scope 2>/dev/null || true
+    fi
+
+    # Stop host-side processes by port (fallback for anything not in the scope)
     for PORT in 8931 8932 3001; do
         if lsof -ti :$PORT >/dev/null 2>&1; then
             echo "  Stopping process on port $PORT..."
@@ -183,15 +189,61 @@ echo "Vibe Kanban allowed origins: $VK_ALLOWED_ORIGINS"
 
 VK_LOG="$LOG_DIR/vibe-kanban.log"
 echo "Starting Vibe Kanban on host (port $VK_PORT)..."
-nohup env HOST=0.0.0.0 PORT=$VK_PORT VK_ALLOWED_ORIGINS="$VK_ALLOWED_ORIGINS" npx -y vibe-kanban > "$VK_LOG" 2>&1 &
-VK_PID=$!
 
-sleep 3
-if ! kill -0 "$VK_PID" 2>/dev/null; then
-    echo "Error: Vibe Kanban failed to start. Check $VK_LOG"
-    exit 1
+# Run VK inside a systemd transient scope backed by vibe-kanban.slice so that
+# the kernel's OOM killer targets this cgroup (VK + all Claude Code children)
+# before touching Docker, Tailscale, or the host OS.
+#
+# vibe-kanban.slice caps the entire tree at 2.5 GB hard / 2 GB soft.
+# systemd --user is available on Ubuntu 22.04+ desktop sessions.
+#
+# If systemd --user is not available (e.g. headless CI), fall back to nohup.
+if systemctl --user status &>/dev/null 2>&1; then
+    # Reload slice definition in case it changed
+    systemctl --user daemon-reload
+
+    # Remove any stale scope from a previous run
+    systemctl --user stop vibe-kanban.scope 2>/dev/null || true
+
+    # systemd-run launches in a stripped environment — PATH won't include nvm.
+    # Resolve npx to its absolute path now (in the current nvm-aware shell) so
+    # the service finds the right Node binary.
+    NPX_BIN="$(command -v npx)"
+
+    systemd-run --user \
+        --unit=vibe-kanban \
+        --slice=vibe-kanban.slice \
+        --same-dir \
+        --collect \
+        -E PATH="$PATH" \
+        -E HOME="$HOME" \
+        -E HOST=0.0.0.0 \
+        -E PORT=$VK_PORT \
+        -E VK_ALLOWED_ORIGINS="$VK_ALLOWED_ORIGINS" \
+        -E CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" \
+        --property=StandardOutput=append:$VK_LOG \
+        --property=StandardError=append:$VK_LOG \
+        "$NPX_BIN" -y vibe-kanban
+    VK_PID=$(systemctl --user show vibe-kanban.scope --property=MainPID --value 2>/dev/null || echo "0")
+else
+    echo "Warning: systemd --user not available, falling back to nohup (no memory cap)"
+    nohup env HOST=0.0.0.0 PORT=$VK_PORT VK_ALLOWED_ORIGINS="$VK_ALLOWED_ORIGINS" \
+        CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" \
+        npx -y vibe-kanban > "$VK_LOG" 2>&1 &
+    VK_PID=$!
 fi
-echo "Vibe Kanban started (PID $VK_PID), logs at $VK_LOG"
+
+for i in $(seq 1 15); do
+    sleep 1
+    if lsof -ti :$VK_PORT >/dev/null 2>&1; then
+        break
+    fi
+    if [ "$i" -eq 15 ]; then
+        echo "Error: Vibe Kanban failed to start on port $VK_PORT after 15s. Check $VK_LOG"
+        exit 1
+    fi
+done
+echo "Vibe Kanban started (PID $VK_PID, slice: vibe-kanban.slice), logs at $VK_LOG"
 
 # ---------------------------------------------------------------------------
 # Restart server (runs on HOST so the container can trigger its own rebuild)
