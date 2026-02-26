@@ -28,7 +28,7 @@ fi
 
 UBUNTU_HOME="/home/ubuntu"
 
-echo "=== 1/5  Swap file ==="
+echo "=== 1/6 Swap file ==="
 SWAP_SIZE="4G"
 if [ ! -f /swapfile ]; then
     fallocate -l "$SWAP_SIZE" /swapfile
@@ -50,7 +50,7 @@ else
     echo "vm.swappiness already configured"
 fi
 
-echo "=== 2/5  Docker ==="
+echo "=== 2/6 Docker ==="
 if ! command -v docker &>/dev/null; then
     curl -fsSL https://get.docker.com | sh
     usermod -aG docker ubuntu
@@ -60,7 +60,7 @@ else
     echo "Docker already installed: $(docker --version)"
 fi
 
-echo "=== 3/5  Node.js 20 (for Playwright MCP, Vibe Kanban) ==="
+echo "=== 3/6 Node.js 20 (for Playwright MCP, Vibe Kanban) ==="
 NODE_VERSION=$(node -v 2>/dev/null | sed 's/^v//' | cut -d. -f1 || echo "0")
 if [ "$NODE_VERSION" -lt 18 ]; then
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
@@ -70,12 +70,86 @@ else
     echo "Node.js already sufficient: $(node -v)"
 fi
 
-echo "=== 4/5  Git config ==="
+echo "=== 4/6  Proton Bridge (for ProtonMail IMAP/SMTP) ==="
+# Install Proton Bridge as a headless systemd service.
+# Version is resolved dynamically from the GitHub releases API so the script
+# always installs the latest release without needing manual updates.
+# After provisioning, the user must log in once interactively:
+#   sudo -u proton /usr/bin/protonmail-bridge -c
+#   > login       (enter ProtonMail credentials)
+#   > list        (verify the account appears)
+#   > exit
+# Then start/enable the service: systemctl enable --now proton-bridge
+BRIDGE_DEB="/tmp/protonmail-bridge.deb"
+if ! command -v protonmail-bridge &>/dev/null; then
+    echo "Fetching latest Proton Bridge release URL..."
+    BRIDGE_DEB_URL=$(curl -fsSL "https://api.github.com/repos/ProtonMail/proton-bridge/releases/latest" \
+        | python3 -c "import json,sys; r=json.load(sys.stdin); print(next(a['browser_download_url'] for a in r['assets'] if 'amd64' in a['name'] and a['name'].endswith('.deb')))")
+    echo "Downloading Proton Bridge from: $BRIDGE_DEB_URL"
+    curl -fsSL "$BRIDGE_DEB_URL" -o "$BRIDGE_DEB"
+    # Install with apt to auto-resolve any dependencies
+    apt-get install -y "$BRIDGE_DEB"
+    rm -f "$BRIDGE_DEB"
+    echo "Proton Bridge installed"
+else
+    echo "Proton Bridge already installed: $(protonmail-bridge --version 2>/dev/null || echo 'version unknown')"
+fi
+
+# Create a dedicated system user for the bridge daemon (no login shell)
+if ! id proton &>/dev/null; then
+    useradd -r -s /bin/false -m -d /home/proton proton
+    echo "Created 'proton' system user"
+else
+    echo "'proton' user already exists"
+fi
+
+# Generate a passphrase-free GPG key for the bridge (needed for keychain/secret storage)
+# Bridge uses the system keychain; on headless Ubuntu this must be pre-seeded.
+if ! sudo -u proton gpg --list-keys 'ProtonMailBridge' &>/dev/null; then
+    sudo -u proton gpg --batch --passphrase '' --quick-gen-key 'ProtonMailBridge' default default never
+    echo "GPG key generated for proton user"
+else
+    echo "GPG key already exists for proton user"
+fi
+
+# Install systemd service unit for headless bridge operation
+cat > /etc/systemd/system/proton-bridge.service <<'UNIT'
+[Unit]
+Description=Proton Mail Bridge (headless)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=proton
+ExecStart=/usr/bin/protonmail-bridge --noninteractive
+Restart=on-failure
+RestartSec=5
+# Bridge listens on localhost by default:
+#   IMAP: 1143   SMTP: 1025
+Environment=HOME=/home/proton
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+echo "Proton Bridge systemd service installed"
+echo ""
+echo "  IMPORTANT: Before starting the service, log in interactively as the proton user:"
+echo "    sudo -u proton /usr/bin/protonmail-bridge -c"
+echo "    > login      (follow prompts)"
+echo "    > list       (verify account appears)"
+echo "    > exit"
+echo "  Then: sudo systemctl enable --now proton-bridge"
+echo ""
+
+echo "=== 5/6  Git config ==="
 su - ubuntu -c 'git config --global user.email "su@localhost"'
 su - ubuntu -c 'git config --global user.name "SU"'
 echo "Git configured for ubuntu user"
 
-echo "=== 5/5  Permissions ==="
+echo "=== 6/6  Permissions ==="
 # Ensure ubuntu owns the repo
 if [ -d "$UBUNTU_HOME/SU" ]; then
     chown -R ubuntu:ubuntu "$UBUNTU_HOME/SU"
@@ -90,6 +164,10 @@ echo "  Provisioning complete."
 echo ""
 echo "  Next steps:"
 echo "    1. sudo tailscale up"
-echo "    2. cp .env.example .env && vim .env"
-echo "    3. bash startup.sh"
+echo "    2. Log in to Proton Bridge (if using ProtonMail):"
+echo "         sudo -u proton /usr/bin/protonmail-bridge -c"
+echo "         > login   > list   > exit"
+echo "         sudo systemctl enable --now proton-bridge"
+echo "    3. cp .env.example .env && vim .env"
+echo "    4. bash startup.sh"
 echo "========================================="

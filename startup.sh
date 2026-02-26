@@ -223,6 +223,24 @@ RESTART_PID=$RESTART_PID
 EOF
 
 # ---------------------------------------------------------------------------
+# Proton Bridge (systemd service — managed separately, just check status here)
+# ---------------------------------------------------------------------------
+# Proton Bridge runs as a systemd service (User=proton) installed by provision.sh.
+# It exposes IMAP on localhost:1143 so the Docker container can read ProtonMail.
+# The service must be set up manually once with: sudo -u proton protonmail-bridge -c
+# If the service is not running, IMAP email features will be unavailable.
+if systemctl is-active proton-bridge &>/dev/null; then
+    echo "Proton Bridge service is running (IMAP on localhost:1143)"
+elif systemctl list-unit-files proton-bridge.service &>/dev/null 2>&1 | grep -q proton-bridge; then
+    echo "Warning: Proton Bridge service is installed but not running."
+    echo "  To start: sudo systemctl start proton-bridge"
+    echo "  (Email reading/searching will be unavailable until Bridge is running)"
+else
+    echo "Proton Bridge not installed — email reading/searching unavailable."
+    echo "  To set up: run provision.sh, then log in with: sudo -u proton protonmail-bridge -c"
+fi
+
+# ---------------------------------------------------------------------------
 # Self-signed SSL certificates (for Tailscale / non-localhost access)
 # ---------------------------------------------------------------------------
 SSL_DIR="$SCRIPT_DIR/nginx/ssl"
@@ -254,6 +272,7 @@ echo "Access the chat at: https://localhost"
 echo "Vibe Kanban running on: https://localhost:53187 (host process via nginx)"
 echo "Playwright MCP server running on: http://localhost:8931/sse"
 echo "Restart server running on: http://localhost:8932/health"
+echo "Proton Bridge (IMAP): localhost:1143 (systemd service — see above)"
 echo ""
 echo "To enable self-iteration: set SELF_ITERATION_MODE=true in .env"
 echo "To view logs:"
@@ -261,6 +280,7 @@ echo "  Docker:         docker compose logs -f"
 echo "  Playwright MCP: tail -f $PLAYWRIGHT_LOG"
 echo "  Vibe Kanban:    tail -f $VK_LOG"
 echo "  Restart server: tail -f $RESTART_LOG"
+echo "  Proton Bridge:  sudo journalctl -u proton-bridge -f"
 echo ""
 echo "To stop all services: ./startup.sh stop"
 echo ""

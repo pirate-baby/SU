@@ -19,6 +19,15 @@ class Settings(BaseSettings):
     # Playwright MCP Bridge (optional — chat works without it)
     playwright_mcp_url: Optional[str] = None
 
+    # ProtonMail (optional — enables email management via protonmail-pro-mcp)
+    protonmail_username: Optional[str] = None
+    protonmail_password: Optional[str] = None
+    protonmail_smtp_host: str = "smtp.protonmail.ch"
+    protonmail_smtp_port: int = 587
+    # Proton Bridge IMAP (for reading email — requires Bridge running locally)
+    protonmail_imap_host: str = "localhost"
+    protonmail_imap_port: int = 1143
+
     # ElevenLabs Voice Mode
     elevenlabs_api_key: Optional[str] = None
     elevenlabs_voice_id: Optional[str] = None

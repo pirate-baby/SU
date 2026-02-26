@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     git \
     nodejs \
+    npm \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy UV from official image (no pip needed!)
@@ -17,6 +18,12 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # Install basic-memory MCP server
 RUN uv tool install basic-memory
+
+# Install protonmail-pro-mcp (email management via ProtonMail/Proton Bridge)
+RUN git clone https://github.com/anyrxo/protonmail-pro-mcp /opt/protonmail-pro-mcp \
+    && cd /opt/protonmail-pro-mcp \
+    && npm install \
+    && npm run build
 
 # Copy dependency files
 COPY pyproject.toml uv.lock ./

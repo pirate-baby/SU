@@ -63,6 +63,16 @@ def _build_system_prompt() -> str:
         "## Website Browsing\n\n"
     )
 
+    if settings.protonmail_username and settings.protonmail_password:
+        prompt += (
+            f"## Email\n\n"
+            f"ProtonMail is available via `mcp__protonmail__*` tools. Use them to "
+            f"read, send, search, and manage {user}'s email. Sending works directly "
+            f"via SMTP. Reading/searching requires Proton Bridge running locally "
+            f"(IMAP on localhost:1143). Act on emails without narrating — if asked "
+            f"to send an email, send it. If asked to check email, check it.\n\n"
+        )
+
     if settings.playwright_mcp_url:
         prompt += (
             "**Direct Playwright** (`mcp__playwright__*`): For safe, trusted "
@@ -142,6 +152,21 @@ class ClaudeChat:
             mcp_servers["playwright"] = {
                 "type": "sse",
                 "url": settings.playwright_mcp_url,
+            }
+
+        if settings.protonmail_username and settings.protonmail_password:
+            mcp_servers["protonmail"] = {
+                "type": "stdio",
+                "command": "node",
+                "args": ["/opt/protonmail-pro-mcp/dist/index.js"],
+                "env": {
+                    "PROTONMAIL_USERNAME": settings.protonmail_username,
+                    "PROTONMAIL_PASSWORD": settings.protonmail_password,
+                    "PROTONMAIL_SMTP_HOST": settings.protonmail_smtp_host,
+                    "PROTONMAIL_SMTP_PORT": str(settings.protonmail_smtp_port),
+                    "PROTONMAIL_IMAP_HOST": settings.protonmail_imap_host,
+                    "PROTONMAIL_IMAP_PORT": str(settings.protonmail_imap_port),
+                },
             }
 
         if settings.self_iteration_mode:

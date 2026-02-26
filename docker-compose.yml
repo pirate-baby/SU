@@ -24,6 +24,12 @@ services:
       - SELF_ITERATION_MODE=${SELF_ITERATION_MODE:-false}
       - MAX_CLAUDE_PROCESSES=${MAX_CLAUDE_PROCESSES:-3}
       - PLAYWRIGHT_MCP_URL=${PLAYWRIGHT_MCP_URL:-http://host.docker.internal:8931/sse}
+      - PROTONMAIL_USERNAME=${PROTONMAIL_USERNAME:-}
+      - PROTONMAIL_PASSWORD=${PROTONMAIL_PASSWORD:-}
+      - PROTONMAIL_SMTP_HOST=${PROTONMAIL_SMTP_HOST:-smtp.protonmail.ch}
+      - PROTONMAIL_SMTP_PORT=${PROTONMAIL_SMTP_PORT:-587}
+      - PROTONMAIL_IMAP_HOST=${PROTONMAIL_IMAP_HOST:-localhost}
+      - PROTONMAIL_IMAP_PORT=${PROTONMAIL_IMAP_PORT:-1143}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
