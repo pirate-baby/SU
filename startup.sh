@@ -288,7 +288,10 @@ EOF
 # If the service is not running, IMAP email features will be unavailable.
 if systemctl is-active proton-bridge &>/dev/null; then
     echo "Proton Bridge service is running (IMAP on localhost:1143)"
-elif systemctl list-unit-files proton-bridge.service &>/dev/null 2>&1 | grep -q proton-bridge; then
+elif pgrep -f 'protonmail-bridge' &>/dev/null; then
+    echo "Proton Bridge is running outside systemd (IMAP on localhost:1143)"
+    echo "  Consider using: sudo systemctl start proton-bridge"
+elif systemctl list-unit-files proton-bridge.service 2>/dev/null | grep -q proton-bridge; then
     echo "Warning: Proton Bridge service is installed but not running."
     echo "  To start: sudo systemctl start proton-bridge"
     echo "  (Email reading/searching will be unavailable until Bridge is running)"
