@@ -311,6 +311,30 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# VAPID keys (for Web Push notifications)
+# ---------------------------------------------------------------------------
+# Web Push requires an ECDSA P-256 key pair. The generate_vapid_keys script
+# uses py_vapid (bundled with pywebpush) which is only available inside the
+# uv virtualenv. If keys are missing, generate them via uv run.
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    if grep -qE '^\s*VAPID_PUBLIC_KEY=' "$SCRIPT_DIR/.env"; then
+        echo "VAPID keys already configured in .env"
+    else
+        echo "Generating VAPID keys for Web Push notifications..."
+        if command -v uv &>/dev/null; then
+            uv run python -m app.generate_vapid_keys --inject "$SCRIPT_DIR/.env"
+        else
+            echo "Warning: uv not found — skipping VAPID key generation"
+            echo "  Run inside the container: uv run python -m app.generate_vapid_keys"
+            echo "  Then copy the output to .env"
+        fi
+    fi
+else
+    echo "Warning: .env not found — skipping VAPID key generation"
+    echo "  (Create .env from .env.example first, then restart)"
+fi
+
+# ---------------------------------------------------------------------------
 # Docker services
 # ---------------------------------------------------------------------------
 
