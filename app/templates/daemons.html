@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SU — Daemons</title>
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#0a0a0a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg: #0a0a0a;
+            --surface: #111111;
+            --surface2: #1a1a1a;
+            --border: #2a2a2a;
+            --text: #c8c8c8;
+            --text-muted: #5a5a5a;
+            --green: #33ff33;
+            --green-dim: #1a9e1a;
+            --green-glow: rgba(51, 255, 51, 0.15);
+            --yellow: #cccc33;
+            --red: #ff3333;
+            --blue: #3399ff;
+            --mono: 'IBM Plex Mono', 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+        }
+        body {
+            font-family: var(--mono);
+            background: var(--bg);
+            color: var(--text);
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Top bar */
+        .topbar {
+            height: 48px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            gap: 16px;
+        }
+        .topbar h1 {
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            color: var(--green);
+            text-shadow: 0 0 10px var(--green-glow);
+        }
+        .topbar a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 13px;
+            font-family: var(--mono);
+        }
+        .topbar a:hover { color: var(--green); }
+
+        /* Layout */
+        .layout {
+            display: flex;
+            height: calc(100vh - 48px);
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 300px;
+            min-width: 300px;
+            border-right: 1px solid var(--border);
+            background: var(--surface);
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+
+        /* Process limiter card */
+        .slot-card {
+            padding: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+        .slot-header {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+        .slot-bar {
+            height: 6px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            margin-bottom: 6px;
+        }
+        .slot-bar-fill {
+            height: 100%;
+            background: var(--green-dim);
+            transition: width 0.3s;
+        }
+        .slot-bar-fill.high { background: var(--yellow); }
+        .slot-bar-fill.full { background: var(--red); }
+        .slot-info {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+        .slot-holders {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        /* Category group */
+        .category-header {
+            padding: 8px 12px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-muted);
+            background: var(--bg);
+            border-bottom: 1px solid var(--border);
+        }
+
+        /* Daemon items */
+        .daemon-item {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+        .daemon-item:hover { background: var(--surface2); }
+        .daemon-item.active {
+            background: rgba(51, 255, 51, 0.05);
+            border-left: 2px solid var(--green-dim);
+        }
+        .daemon-name {
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .daemon-desc {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+        .daemon-meta {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* Status dot */
+        .status-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            display: inline-block;
+            flex-shrink: 0;
+        }
+        .status-dot.idle { background: var(--green-dim); }
+        .status-dot.running {
+            background: var(--green);
+            box-shadow: 0 0 6px var(--green-glow);
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        .status-dot.failed { background: var(--red); }
+        .status-dot.waiting { background: var(--text-muted); }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* Badge */
+        .badge {
+            font-size: 9px;
+            padding: 1px 6px;
+            font-weight: 600;
+            font-family: var(--mono);
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+        .badge-running { background: rgba(51, 255, 51, 0.1); color: var(--green); border: 1px solid #113311; }
+        .badge-idle { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
+        .badge-failed { background: rgba(255, 51, 51, 0.08); color: var(--red); border: 1px solid #331111; }
+        .badge-event { background: rgba(51, 153, 255, 0.08); color: var(--blue); border: 1px solid #112233; }
+
+        /* Main panels */
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+        .panels {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+        .panel + .panel { border-top: 1px solid var(--border); }
+
+        .panel-header {
+            height: 36px;
+            padding: 0 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--surface2);
+            border-bottom: 1px solid var(--border);
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            flex-shrink: 0;
+        }
+        .panel-body {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        /* Run history table */
+        .run-row {
+            padding: 5px 12px;
+            border-bottom: 1px solid rgba(42, 42, 42, 0.5);
+            font-size: 12px;
+            line-height: 1.6;
+            display: flex;
+            gap: 10px;
+            align-items: baseline;
+        }
+        .run-row:hover { background: rgba(51, 255, 51, 0.03); }
+        .run-time {
+            color: var(--text-muted);
+            font-size: 11px;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .run-duration {
+            color: var(--text);
+            font-size: 11px;
+            white-space: nowrap;
+            flex-shrink: 0;
+            min-width: 60px;
+        }
+        .run-status {
+            font-size: 9px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            padding: 0 5px;
+            flex-shrink: 0;
+            min-width: 65px;
+            text-align: center;
+            font-family: var(--mono);
+        }
+        .run-status-completed { background: rgba(51, 255, 51, 0.08); color: var(--green-dim); }
+        .run-status-failed { background: rgba(255, 51, 51, 0.1); color: var(--red); }
+        .run-status-running { background: rgba(51, 255, 51, 0.1); color: var(--green); }
+        .run-error {
+            color: var(--red);
+            font-size: 11px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .run-meta {
+            color: var(--text-muted);
+            font-size: 11px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* Log rows (same as sessions.html) */
+        .log-row {
+            padding: 4px 12px;
+            border-bottom: 1px solid rgba(42, 42, 42, 0.5);
+            font-family: var(--mono);
+            font-size: 12px;
+            line-height: 1.6;
+            display: flex;
+            gap: 8px;
+            align-items: baseline;
+        }
+        .log-row:hover { background: rgba(51, 255, 51, 0.03); }
+        .log-time {
+            color: var(--text-muted);
+            font-size: 11px;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .log-level {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            padding: 0 5px;
+            flex-shrink: 0;
+            min-width: 50px;
+            text-align: center;
+            font-family: var(--mono);
+        }
+        .log-level-debug { background: var(--surface2); color: var(--text-muted); }
+        .log-level-info { background: rgba(51, 153, 255, 0.1); color: var(--blue); }
+        .log-level-warning { background: rgba(204, 204, 51, 0.1); color: var(--yellow); }
+        .log-level-error { background: rgba(255, 51, 51, 0.1); color: var(--red); }
+        .log-event {
+            color: var(--text);
+            flex-shrink: 0;
+            font-weight: 500;
+        }
+        .log-data {
+            color: var(--text-muted);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* Empty / loading state */
+        .empty-state {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+
+        /* Countdown */
+        .next-run {
+            font-size: 10px;
+            color: var(--green-dim);
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <h1>SU // Daemons</h1>
+        <a href="/">Chat</a>
+        <a href="/planner">Planner</a>
+        <a href="/sessions">Sessions</a>
+    </div>
+
+    <div class="layout">
+        <div class="sidebar" id="sidebar">
+            <div class="empty-state">Loading...</div>
+        </div>
+
+        <div class="main">
+            <div class="panels">
+                <div class="panel">
+                    <div class="panel-header">
+                        <span id="runs-title">Run History</span>
+                    </div>
+                    <div class="panel-body" id="runs-panel">
+                        <div class="empty-state">Select a daemon</div>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-header">
+                        <span id="logs-title">Daemon Logs</span>
+                    </div>
+                    <div class="panel-body" id="logs-panel">
+                        <div class="empty-state">Select a daemon</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        const sidebar = document.getElementById('sidebar');
+        const runsPanel = document.getElementById('runs-panel');
+        const logsPanel = document.getElementById('logs-panel');
+        const runsTitle = document.getElementById('runs-title');
+        const logsTitle = document.getElementById('logs-title');
+
+        let daemonData = null;
+        let selectedDaemon = null;
+        let pollTimer = null;
+
+        // ---- Helpers ----
+
+        function fmtTime(iso) {
+            if (!iso) return '\u2014';
+            const d = new Date(iso);
+            return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                + '.' + String(d.getMilliseconds()).padStart(3, '0');
+        }
+
+        function fmtDate(iso) {
+            if (!iso) return '\u2014';
+            const d = new Date(iso);
+            const mon = d.toLocaleString('en-US', { month: 'short' });
+            return `${mon} ${d.getDate()} ${fmtTime(iso)}`;
+        }
+
+        function fmtDuration(ms) {
+            if (ms == null) return '\u2014';
+            if (ms < 1000) return ms + 'ms';
+            const s = (ms / 1000).toFixed(1);
+            if (s < 60) return s + 's';
+            const m = Math.floor(ms / 60000);
+            const rem = ((ms % 60000) / 1000).toFixed(0);
+            return m + 'm' + rem + 's';
+        }
+
+        function fmtCountdown(isoTarget) {
+            if (!isoTarget) return '';
+            const diff = new Date(isoTarget).getTime() - Date.now();
+            if (diff <= 0) return 'due now';
+            const s = Math.floor(diff / 1000);
+            if (s < 60) return s + 's';
+            const m = Math.floor(s / 60);
+            if (m < 60) return m + 'm';
+            const h = Math.floor(m / 60);
+            const rm = m % 60;
+            return h + 'h' + (rm > 0 ? rm + 'm' : '');
+        }
+
+        function fmtInterval(sec) {
+            if (!sec) return 'event-driven';
+            if (sec < 60) return sec + 's';
+            if (sec < 3600) return (sec / 60) + 'm';
+            return (sec / 3600) + 'h';
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        function daemonStatus(d) {
+            if (d.is_running) return 'running';
+            if (!d.interval_seconds) return 'waiting';
+            if (d.last_run && d.last_run.status === 'failed') return 'failed';
+            return 'idle';
+        }
+
+        function statusBadge(status) {
+            const cls = {
+                running: 'badge-running',
+                idle: 'badge-idle',
+                failed: 'badge-failed',
+                waiting: 'badge-event',
+            }[status] || 'badge-idle';
+            return `<span class="badge ${cls}">${status}</span>`;
+        }
+
+        // ---- Sidebar rendering ----
+
+        function renderSidebar() {
+            if (!daemonData) return;
+
+            const limiter = daemonData.process_limiter;
+            const pct = limiter.max_slots > 0 ? (limiter.used_slots / limiter.max_slots * 100) : 0;
+            const fillClass = pct >= 100 ? 'full' : pct >= 66 ? 'high' : '';
+
+            let html = '';
+
+            // Process limiter card
+            html += `<div class="slot-card">
+                <div class="slot-header">Process Slots</div>
+                <div class="slot-bar"><div class="slot-bar-fill ${fillClass}" style="width:${pct}%"></div></div>
+                <div class="slot-info">${limiter.used_slots} / ${limiter.max_slots} used</div>`;
+            if (limiter.holders.length > 0) {
+                html += `<div class="slot-holders">${limiter.holders.map(escapeHtml).join(', ')}</div>`;
+            }
+            html += '</div>';
+
+            // Group daemons by category
+            const groups = {};
+            for (const d of daemonData.daemons) {
+                (groups[d.category] = groups[d.category] || []).push(d);
+            }
+
+            const categoryLabels = { scheduler: 'Scheduler', memory: 'Memory', system: 'System' };
+            for (const cat of ['scheduler', 'memory', 'system']) {
+                const daemons = groups[cat];
+                if (!daemons || daemons.length === 0) continue;
+
+                html += `<div class="category-header">${categoryLabels[cat]}</div>`;
+                for (const d of daemons) {
+                    const status = daemonStatus(d);
+                    const isActive = selectedDaemon === d.name ? ' active' : '';
+
+                    let metaRight = '';
+                    if (d.is_running) {
+                        metaRight = statusBadge('running');
+                    } else if (d.next_scheduled_at) {
+                        const cd = fmtCountdown(d.next_scheduled_at);
+                        metaRight = cd ? `<span class="next-run">next: ${cd}</span>` : '';
+                    }
+
+                    let metaLeft = fmtInterval(d.interval_seconds);
+                    if (d.condition) metaLeft += ` (${escapeHtml(d.condition)})`;
+
+                    html += `<div class="daemon-item${isActive}" data-name="${d.name}">
+                        <div class="daemon-name">
+                            <span class="status-dot ${status}"></span>
+                            ${escapeHtml(d.display_name)}
+                        </div>
+                        <div class="daemon-desc">${escapeHtml(d.description)}</div>
+                        <div class="daemon-meta">
+                            <span>${metaLeft}</span>
+                            ${metaRight}
+                        </div>
+                    </div>`;
+                }
+            }
+
+            sidebar.innerHTML = html;
+
+            // Bind click handlers
+            sidebar.querySelectorAll('.daemon-item').forEach(el => {
+                el.addEventListener('click', () => selectDaemon(el.dataset.name));
+            });
+        }
+
+        // ---- Detail panels ----
+
+        async function selectDaemon(name) {
+            selectedDaemon = name;
+            renderSidebar();
+
+            const info = daemonData.daemons.find(d => d.name === name);
+            runsTitle.textContent = `Run History \u2014 ${info ? info.display_name : name}`;
+            logsTitle.textContent = `Logs \u2014 ${info ? info.display_name : name}`;
+
+            runsPanel.innerHTML = '<div class="empty-state">Loading...</div>';
+            logsPanel.innerHTML = '<div class="empty-state">Loading...</div>';
+
+            const [runsRes, logsRes] = await Promise.all([
+                fetch(`/api/daemons/${name}/runs?limit=100`),
+                fetch(`/api/daemons/${name}/logs?limit=200`),
+            ]);
+            const runs = await runsRes.json();
+            const logs = await logsRes.json();
+
+            renderRuns(runs);
+            renderLogs(logs);
+        }
+
+        function renderRuns(runs) {
+            if (!runs.length) {
+                runsPanel.innerHTML = '<div class="empty-state">No runs recorded yet</div>';
+                return;
+            }
+
+            runsPanel.innerHTML = runs.map(r => {
+                const statusCls = `run-status-${r.status}`;
+                const dur = fmtDuration(r.duration_ms);
+
+                let extra = '';
+                if (r.error && r.error !== 'cancelled') {
+                    extra = `<span class="run-error">${escapeHtml(r.error)}</span>`;
+                }
+                if (r.metadata && r.metadata !== '{}') {
+                    let metaStr = '';
+                    try {
+                        const parsed = typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata;
+                        metaStr = Object.entries(parsed)
+                            .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
+                            .join(' ');
+                    } catch { metaStr = ''; }
+                    if (metaStr && !extra) {
+                        extra = `<span class="run-meta">${escapeHtml(metaStr)}</span>`;
+                    }
+                }
+
+                return `<div class="run-row">
+                    <span class="run-time">${fmtDate(r.started_at)}</span>
+                    <span class="run-status ${statusCls}">${r.status}</span>
+                    <span class="run-duration">${dur}</span>
+                    ${extra}
+                </div>`;
+            }).join('');
+        }
+
+        function renderLogs(logs) {
+            if (!logs.length) {
+                logsPanel.innerHTML = '<div class="empty-state">No logs yet</div>';
+                return;
+            }
+
+            logsPanel.innerHTML = logs.map(l => {
+                const data = l.data && l.data !== '{}' ? l.data : '';
+                let dataStr = '';
+                if (data) {
+                    try {
+                        const parsed = JSON.parse(data);
+                        dataStr = Object.entries(parsed)
+                            .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
+                            .join(' ');
+                    } catch { dataStr = data; }
+                }
+                return `<div class="log-row">
+                    <span class="log-time">${fmtTime(l.timestamp)}</span>
+                    <span class="log-level log-level-${l.level}">${l.level}</span>
+                    <span class="log-event">${escapeHtml(l.event)}</span>
+                    <span class="log-data">${escapeHtml(dataStr)}</span>
+                </div>`;
+            }).join('');
+        }
+
+        // ---- Polling ----
+
+        async function fetchDaemonIndex() {
+            try {
+                const res = await fetch('/api/daemons');
+                daemonData = await res.json();
+                renderSidebar();
+            } catch (e) {
+                console.error('Failed to fetch daemon index:', e);
+            }
+        }
+
+        function startPolling() {
+            fetchDaemonIndex();
+            pollTimer = setInterval(fetchDaemonIndex, 5000);
+        }
+
+        // ---- Boot ----
+        startPolling();
+    })();
+    </script>
+    <script src="/static/js/notifications.js"></script>
+</body>
+</html>

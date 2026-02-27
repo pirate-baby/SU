@@ -221,6 +221,30 @@ async def init_database():
                 "ALTER TABLE interjections ADD COLUMN related_su_note_id TEXT"
             )
 
+        # -- Daemon process runs (for the daemon index) --
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS daemon_runs (
+                id TEXT PRIMARY KEY,
+                daemon_name TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                ended_at TEXT,
+                status TEXT NOT NULL DEFAULT 'running',
+                error TEXT,
+                metadata TEXT,
+                duration_ms INTEGER
+            )
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_daemon_runs_name_started
+            ON daemon_runs(daemon_name, started_at DESC)
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_daemon_runs_status
+            ON daemon_runs(status)
+        """)
+
         # -- Push subscriptions (Web Push / VAPID) --
         await db.execute("""
             CREATE TABLE IF NOT EXISTS push_subscriptions (

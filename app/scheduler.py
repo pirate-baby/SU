@@ -15,6 +15,9 @@ from datetime import datetime, timedelta
 from typing import Any, Callable, Coroutine, Optional
 
 from app.config import settings
+from app.daemon_registry import (
+    daemon_registry, DaemonInfo, DaemonCategory, RunStatus,
+)
 from app.logger import get_logger
 from app.repositories import EventRepo, InterjectionRepo, SuNoteRepo
 
@@ -40,6 +43,45 @@ class Scheduler:
         """Start all periodic jobs. Called from FastAPI lifespan."""
         self._running = True
         self._push_fn = push_interjection_fn
+
+        # Register all scheduler daemons with the process index
+        daemon_registry.register(DaemonInfo(
+            name="calendar_check",
+            display_name="Calendar Check",
+            category=DaemonCategory.SCHEDULER,
+            interval_seconds=1800,
+            description="Checks upcoming events, spawns subagent for reminders",
+        ))
+        daemon_registry.register(DaemonInfo(
+            name="interjection_delivery",
+            display_name="Interjection Delivery",
+            category=DaemonCategory.SCHEDULER,
+            interval_seconds=60,
+            description="Pushes pending interjections to WebSocket/Web Push",
+        ))
+        daemon_registry.register(DaemonInfo(
+            name="note_processor",
+            display_name="Note Processor",
+            category=DaemonCategory.SCHEDULER,
+            interval_seconds=600,
+            description="Processes SU notes-to-self, spawns subagent for triage",
+        ))
+        if settings.protonmail_username and settings.protonmail_password:
+            daemon_registry.register(DaemonInfo(
+                name="email_scanner",
+                display_name="Email Scanner",
+                category=DaemonCategory.SCHEDULER,
+                interval_seconds=600,
+                description="Triages inbox via ProtonMail, creates tasks and notes",
+            ))
+        daemon_registry.register(DaemonInfo(
+            name="daily_review",
+            display_name="Daily Review",
+            category=DaemonCategory.SCHEDULER,
+            interval_seconds=3600,
+            condition="Once/day, 6-9am UTC",
+            description="Composes morning brief from tasks, events, and notes",
+        ))
 
         self._tasks["calendar_check"] = asyncio.create_task(
             self._periodic("calendar_check", self._calendar_check, interval=1800),
@@ -91,12 +133,16 @@ class Scheduler:
         await self._ready.wait()
 
         while self._running:
+            run_id = await daemon_registry.start_run(name)
             try:
                 await func()
+                await daemon_registry.end_run(run_id, name, RunStatus.COMPLETED)
             except asyncio.CancelledError:
+                await daemon_registry.end_run(run_id, name, RunStatus.FAILED, error="cancelled")
                 break
-            except Exception:
+            except Exception as exc:
                 log.exception("scheduler.job_error", job=name)
+                await daemon_registry.end_run(run_id, name, RunStatus.FAILED, error=str(exc))
 
             try:
                 await asyncio.sleep(interval)
@@ -205,7 +251,7 @@ class Scheduler:
         )
 
         try:
-            async with claude_process_slot(timeout=90), ClaudeSDKClient(options=options) as client:
+            async with claude_process_slot(timeout=90, name="calendar_check"), ClaudeSDKClient(options=options) as client:
                 await client.query(prompt)
                 async for message in client.receive_response():
                     if isinstance(message, ResultMessage) and message.is_error:
@@ -381,7 +427,7 @@ class Scheduler:
         )
 
         try:
-            async with claude_process_slot(timeout=120), ClaudeSDKClient(options=options) as client:
+            async with claude_process_slot(timeout=120, name="note_processor"), ClaudeSDKClient(options=options) as client:
                 await client.query(prompt)
                 async for message in client.receive_response():
                     if isinstance(message, ResultMessage) and message.is_error:
@@ -488,7 +534,7 @@ class Scheduler:
         )
 
         try:
-            async with claude_process_slot(timeout=180), ClaudeSDKClient(options=options) as client:
+            async with claude_process_slot(timeout=180, name="email_scanner"), ClaudeSDKClient(options=options) as client:
                 await client.query(prompt)
                 async for message in client.receive_response():
                     if isinstance(message, ResultMessage) and message.is_error:
@@ -586,7 +632,7 @@ class Scheduler:
         )
 
         try:
-            async with claude_process_slot(timeout=120), ClaudeSDKClient(options=options) as client:
+            async with claude_process_slot(timeout=120, name="daily_review"), ClaudeSDKClient(options=options) as client:
                 await client.query(prompt)
                 async for message in client.receive_response():
                     if isinstance(message, ResultMessage) and message.is_error:

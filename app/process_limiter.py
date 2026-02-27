@@ -34,6 +34,20 @@ DEFAULT_TIMEOUT = int(os.environ.get("CLAUDE_PROCESS_TIMEOUT", "180"))
 
 _semaphore: asyncio.Semaphore | None = None
 
+# Track what's holding slots (best-effort, for the daemon index)
+_slot_holders: list[str] = []
+
+
+def get_slot_status() -> dict:
+    """Return current process limiter state for the daemon index."""
+    sem = _get_semaphore()
+    return {
+        "max_slots": MAX_CLAUDE_PROCESSES,
+        "available_slots": sem._value,
+        "used_slots": MAX_CLAUDE_PROCESSES - sem._value,
+        "holders": list(_slot_holders),
+    }
+
 
 def _get_semaphore() -> asyncio.Semaphore:
     """Lazy-init so the semaphore is created inside the running event loop."""
@@ -56,8 +70,9 @@ class claude_process_slot:
         Defaults to ``DEFAULT_TIMEOUT``.
     """
 
-    def __init__(self, timeout: int | None = DEFAULT_TIMEOUT):
+    def __init__(self, timeout: int | None = DEFAULT_TIMEOUT, name: str = "unknown"):
         self._timeout = timeout
+        self._name = name
         self._task: asyncio.Task | None = None
 
     async def __aenter__(self):
@@ -68,11 +83,13 @@ class claude_process_slot:
             max=MAX_CLAUDE_PROCESSES,
         )
         await sem.acquire()
+        _slot_holders.append(self._name)
         log.info(
             "process_limiter.acquired",
             available=sem._value,
             max=MAX_CLAUDE_PROCESSES,
             timeout=self._timeout,
+            name=self._name,
         )
         if self._timeout is not None:
             # Arm a watchdog that cancels the current task after *timeout* seconds.
@@ -100,10 +117,15 @@ class claude_process_slot:
 
         sem = _get_semaphore()
         sem.release()
+        try:
+            _slot_holders.remove(self._name)
+        except ValueError:
+            pass
         log.info(
             "process_limiter.released",
             available=sem._value,
             max=MAX_CLAUDE_PROCESSES,
+            name=self._name,
         )
         # Suppress CancelledError raised by our own watchdog so the caller
         # sees a clean exit rather than an unhandled cancellation.

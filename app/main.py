@@ -40,6 +40,11 @@ from app.agent_registry import (
     mark_ws_disconnected,
 )
 from app.scheduler import scheduler
+from app.daemon_registry import (
+    daemon_registry, DaemonInfo, DaemonCategory,
+    cleanup_stale_runs, get_last_completed_run, get_runs,
+)
+from app.process_limiter import get_slot_status
 from app.repositories import TaskRepo, EventRepo, InterjectionRepo, PushSubscriptionRepo, SuNoteRepo
 
 log = get_logger(__name__)
@@ -98,7 +103,17 @@ async def deliver_pending_interjections(websocket: WebSocket) -> None:
 async def lifespan(app: FastAPI):
     """Initialize database, log writer, and scheduler on startup."""
     await init_database()
+    await cleanup_stale_runs()
     await start_log_writer()
+
+    # Register the log writer as a system daemon
+    daemon_registry.register(DaemonInfo(
+        name="log_writer",
+        display_name="Log Writer",
+        category=DaemonCategory.SYSTEM,
+        description="Batches log entries into SQLite",
+    ))
+
     cleanup_task = asyncio.create_task(cleanup_idle_agents())
     await scheduler.start(push_interjection_to_clients)
     log.info("app.startup", version="3.0.0")
@@ -344,6 +359,93 @@ async def get_logs(
 
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     query = f"SELECT * FROM logs {where} ORDER BY timestamp ASC LIMIT ?"
+    params.append(limit)
+
+    async with get_db() as db:
+        cursor = await db.execute(query, params)
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+
+# ---- Daemon process index ----
+
+@app.get("/daemons", response_class=HTMLResponse)
+async def daemons_page(request: Request):
+    """Serve the daemon process index page."""
+    return templates.TemplateResponse("daemons.html", {"request": request})
+
+
+@app.get("/api/daemons")
+async def api_daemon_index():
+    """Return the daemon process index with current state."""
+    from datetime import datetime, timedelta, timezone
+
+    daemons = []
+    for info in daemon_registry.list_daemons():
+        current_runs = daemon_registry.get_current_runs(info.name)
+        last_run = await get_last_completed_run(info.name)
+
+        # Calculate next scheduled run
+        next_run_at = None
+        if info.interval_seconds and last_run:
+            last_start = datetime.fromisoformat(last_run["started_at"])
+            next_run_at = (last_start + timedelta(seconds=info.interval_seconds)).isoformat()
+
+        daemons.append({
+            "name": info.name,
+            "display_name": info.display_name,
+            "category": info.category.value,
+            "interval_seconds": info.interval_seconds,
+            "condition": info.condition,
+            "description": info.description,
+            "is_running": len(current_runs) > 0,
+            "current_runs": [
+                {"id": r.id, "started_at": r.started_at, "metadata": r.metadata}
+                for r in current_runs
+            ],
+            "last_run": last_run,
+            "next_scheduled_at": next_run_at,
+        })
+
+    return {
+        "daemons": daemons,
+        "process_limiter": get_slot_status(),
+    }
+
+
+@app.get("/api/daemons/{daemon_name}/runs")
+async def api_daemon_runs(daemon_name: str, limit: int = 50, offset: int = 0):
+    """Return run history for a daemon."""
+    if not daemon_registry.get_daemon(daemon_name):
+        raise HTTPException(404, f"Unknown daemon: {daemon_name}")
+    return await get_runs(daemon_name, limit=limit, offset=offset)
+
+
+@app.get("/api/daemons/{daemon_name}/logs")
+async def api_daemon_logs(daemon_name: str, limit: int = 200, since: str | None = None):
+    """Return logs for a specific daemon, filtered by event prefix."""
+    prefix_map = {
+        "calendar_check": "scheduler.calendar",
+        "interjection_delivery": "scheduler.interjection",
+        "note_processor": "scheduler.note_processor",
+        "email_scanner": "scheduler.email_scanner",
+        "daily_review": "scheduler.daily_review",
+        "subconscious": "memory.subconscious",
+        "rem": "memory.rem",
+        "agent_cleanup": "registry.cleanup",
+        "log_writer": "logger.",
+    }
+    prefix = prefix_map.get(daemon_name)
+    if not prefix:
+        raise HTTPException(404, f"Unknown daemon: {daemon_name}")
+
+    clauses = ["event LIKE ?"]
+    params: list = [f"{prefix}%"]
+    if since:
+        clauses.append("timestamp >= ?")
+        params.append(since)
+    where = "WHERE " + " AND ".join(clauses)
+    query = f"SELECT * FROM logs {where} ORDER BY timestamp DESC LIMIT ?"
     params.append(limit)
 
     async with get_db() as db:

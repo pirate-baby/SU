@@ -8,9 +8,26 @@ the main chat flow is never disrupted.
 import asyncio
 from typing import Optional
 
+from app.daemon_registry import (
+    daemon_registry, DaemonInfo, DaemonCategory, RunStatus,
+)
 from app.logger import get_logger
 
 log = get_logger(__name__)
+
+# Register memory daemons with the process index
+daemon_registry.register(DaemonInfo(
+    name="subconscious",
+    display_name="Subconscious",
+    category=DaemonCategory.MEMORY,
+    description="Searches knowledge base for relevant context (per-session)",
+))
+daemon_registry.register(DaemonInfo(
+    name="rem",
+    display_name="REM Memory",
+    category=DaemonCategory.MEMORY,
+    description="Post-session memory consolidation into knowledge base",
+))
 
 # ---------------------------------------------------------------------------
 # In-memory state (resets on process restart — acceptable)
@@ -85,20 +102,28 @@ async def on_session_end(session_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 async def _run_subconscious(session_id: str) -> None:
+    run_id = await daemon_registry.start_run("subconscious", session_id=session_id)
     try:
         from app.subconscious_agent import search_memories
         await search_memories(session_id)
+        await daemon_registry.end_run(run_id, "subconscious", RunStatus.COMPLETED)
     except asyncio.CancelledError:
+        await daemon_registry.end_run(run_id, "subconscious", RunStatus.FAILED, error="cancelled")
         log.debug("memory.subconscious_task_cancelled", session_id=session_id)
     except Exception:
+        await daemon_registry.end_run(run_id, "subconscious", RunStatus.FAILED,
+                                       error="see logs")
         log.exception("memory.subconscious_failed", session_id=session_id)
     finally:
         _pending_tasks.pop(session_id, None)
 
 
 async def _run_rem(session_id: str) -> None:
+    run_id = await daemon_registry.start_run("rem", session_id=session_id)
     try:
         from app.rem_agent import consolidate_memories
         await consolidate_memories(session_id)
+        await daemon_registry.end_run(run_id, "rem", RunStatus.COMPLETED)
     except Exception:
+        await daemon_registry.end_run(run_id, "rem", RunStatus.FAILED, error="see logs")
         log.exception("memory.rem_failed", session_id=session_id)

@@ -11,11 +11,23 @@ from fastapi import WebSocket
 
 from app.claude_client import ClaudeChat
 from app.config import settings
+from app.daemon_registry import (
+    daemon_registry, DaemonInfo, DaemonCategory, RunStatus,
+)
 from app.logger import get_logger
-from app.process_limiter import _get_semaphore, claude_process_slot
+from app.process_limiter import _get_semaphore, _slot_holders, claude_process_slot
 from app.session_manager import get_session
 
 log = get_logger(__name__)
+
+# Register the agent cleanup daemon
+daemon_registry.register(DaemonInfo(
+    name="agent_cleanup",
+    display_name="Agent Cleanup",
+    category=DaemonCategory.SYSTEM,
+    interval_seconds=60,
+    description="Disconnects idle agents to free process slots",
+))
 
 # Live agents keyed by session_id
 _agents: dict[str, ClaudeChat] = {}
@@ -50,6 +62,7 @@ async def get_or_create_agent(session_id: str) -> ClaudeChat:
         raise
 
     # Slot stays held until release_agent() is called.
+    _slot_holders.append(f"session:{session_id[:8]}")
     _agents[session_id] = claude
     _agent_locks[session_id] = asyncio.Lock()
     _last_activity[session_id] = time.monotonic()
@@ -119,6 +132,10 @@ async def release_agent(session_id: str) -> None:
             log.warning("registry.disconnect_failed", session_id=session_id)
         finally:
             _get_semaphore().release()
+            try:
+                _slot_holders.remove(f"session:{session_id[:8]}")
+            except ValueError:
+                pass
             log.info("registry.released_agent", session_id=session_id)
 
 
@@ -139,11 +156,18 @@ async def cleanup_idle_agents() -> None:
     log.info("registry.cleanup_started", ttl_seconds=AGENT_TTL_SECONDS)
     while True:
         await asyncio.sleep(60)
-        now = time.monotonic()
-        stale = [
-            sid for sid, ts in _last_activity.items()
-            if now - ts > AGENT_TTL_SECONDS and sid not in _active_ws
-        ]
-        for sid in stale:
-            log.info("registry.cleanup_idle", session_id=sid)
-            await release_agent(sid)
+        run_id = await daemon_registry.start_run("agent_cleanup")
+        try:
+            now = time.monotonic()
+            stale = [
+                sid for sid, ts in _last_activity.items()
+                if now - ts > AGENT_TTL_SECONDS and sid not in _active_ws
+            ]
+            for sid in stale:
+                log.info("registry.cleanup_idle", session_id=sid)
+                await release_agent(sid)
+            await daemon_registry.end_run(run_id, "agent_cleanup", RunStatus.COMPLETED)
+        except Exception as exc:
+            await daemon_registry.end_run(run_id, "agent_cleanup", RunStatus.FAILED,
+                                           error=str(exc))
+            raise
