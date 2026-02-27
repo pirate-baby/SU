@@ -10,6 +10,7 @@ class VoiceMode {
     constructor() {
         this.state = 'idle'; // idle | recording | processing | playing
         this.enabled = false;
+        this.conversationActive = false; // persistent voice conversation mode
 
         // Audio contexts
         this.sttAudioContext = null; // 16kHz for STT capture
@@ -62,11 +63,26 @@ class VoiceMode {
         // Create playback context on first user gesture (required by iOS Safari)
         this._ensurePlaybackContext();
 
-        if (this.state === 'idle') {
+        if (!this.conversationActive) {
+            // Enter voice conversation mode
+            this.conversationActive = true;
+            this._updateUI();
             await this.startRecording();
-        } else if (this.state === 'recording') {
-            this.stopRecording(true);
+        } else {
+            // Exit voice conversation mode
+            this.endConversation();
         }
+    }
+
+    endConversation() {
+        this.conversationActive = false;
+        if (this.state === 'recording') {
+            this.stopRecording(false); // discard partial — user is ending conversation
+        }
+        this._cleanup();
+        this.state = 'idle';
+        this._updateUI();
+        this._showPartialTranscript('');
     }
 
     async startRecording() {
@@ -244,7 +260,8 @@ class VoiceMode {
         if (this.state !== 'playing') {
             this.state = 'playing';
             this._ensurePlaybackContext();
-            this.nextPlayTime = this.playbackContext.currentTime;
+            // Small initial buffer (200ms) to let first chunk decode before playing
+            this.nextPlayTime = this.playbackContext.currentTime + 0.2;
             this.pendingAudioChunks = 0;
             this.playedAudioChunks = 0;
             this.audioEndReceived = false;
@@ -267,9 +284,11 @@ class VoiceMode {
                 source.buffer = buffer;
                 source.connect(this.playbackContext.destination);
 
+                // Schedule seamlessly — small overlap tolerance to prevent gaps
                 const startTime = Math.max(this.playbackContext.currentTime, this.nextPlayTime);
                 source.start(startTime);
-                this.nextPlayTime = startTime + buffer.duration;
+                // Subtract a tiny overlap (5ms) to prevent audible gaps between chunks
+                this.nextPlayTime = startTime + buffer.duration - 0.005;
 
                 source.onended = () => {
                     this.playedAudioChunks++;
@@ -285,6 +304,14 @@ class VoiceMode {
         );
     }
 
+    handleFillerEnd() {
+        // Filler audio finished — let any queued chunks play out but don't
+        // trigger the conversation loop or state transition. The real response
+        // audio will arrive after assistant_start and have its own audio_end.
+        // Nothing to do — chunks will play out naturally and the real
+        // audio_end will be the one that matters.
+    }
+
     handleAudioEnd() {
         this.audioEndReceived = true;
         this._checkPlaybackComplete();
@@ -295,8 +322,14 @@ class VoiceMode {
             // All audio has been played
             // Small buffer to let the last chunk finish
             setTimeout(() => {
-                this.state = 'idle';
-                this._updateUI();
+                if (this.conversationActive) {
+                    // Continuous conversation — start listening again
+                    this.state = 'idle';
+                    this.startRecording();
+                } else {
+                    this.state = 'idle';
+                    this._updateUI();
+                }
             }, 200);
         }
     }
@@ -316,28 +349,52 @@ class VoiceMode {
         if (!this.micBtn) return;
 
         // Reset classes
-        this.micBtn.classList.remove('recording', 'processing', 'playing');
+        this.micBtn.classList.remove('recording', 'processing', 'playing', 'voice-active');
 
-        switch (this.state) {
-            case 'idle':
-                this.micBtn.disabled = false;
-                this._setVoiceStatus('');
-                break;
-            case 'recording':
-                this.micBtn.classList.add('recording');
-                this.micBtn.disabled = false;
-                this._setVoiceStatus('Listening...');
-                break;
-            case 'processing':
-                this.micBtn.classList.add('processing');
-                this.micBtn.disabled = true;
-                this._setVoiceStatus('Thinking...');
-                break;
-            case 'playing':
-                this.micBtn.classList.add('playing');
-                this.micBtn.disabled = true;
-                this._setVoiceStatus('Speaking...');
-                break;
+        if (this.conversationActive) {
+            // Mic is always clickable in conversation mode (to end it)
+            this.micBtn.classList.add('voice-active');
+            this.micBtn.disabled = false;
+
+            switch (this.state) {
+                case 'idle':
+                    this._setVoiceStatus('Voice on');
+                    break;
+                case 'recording':
+                    this.micBtn.classList.add('recording');
+                    this._setVoiceStatus('Listening...');
+                    break;
+                case 'processing':
+                    this.micBtn.classList.add('processing');
+                    this._setVoiceStatus('Thinking...');
+                    break;
+                case 'playing':
+                    this.micBtn.classList.add('playing');
+                    this._setVoiceStatus('Speaking...');
+                    break;
+            }
+        } else {
+            switch (this.state) {
+                case 'idle':
+                    this.micBtn.disabled = false;
+                    this._setVoiceStatus('');
+                    break;
+                case 'recording':
+                    this.micBtn.classList.add('recording');
+                    this.micBtn.disabled = false;
+                    this._setVoiceStatus('Listening...');
+                    break;
+                case 'processing':
+                    this.micBtn.classList.add('processing');
+                    this.micBtn.disabled = true;
+                    this._setVoiceStatus('Thinking...');
+                    break;
+                case 'playing':
+                    this.micBtn.classList.add('playing');
+                    this.micBtn.disabled = true;
+                    this._setVoiceStatus('Speaking...');
+                    break;
+            }
         }
     }
 

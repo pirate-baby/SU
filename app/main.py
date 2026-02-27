@@ -3,6 +3,7 @@ FastAPI application with Claude chat functionality and life management.
 """
 import asyncio
 import json
+import random as _random
 from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
@@ -621,6 +622,19 @@ async def _ws_send(websocket: WebSocket, data: dict) -> bool:
         return False
 
 
+VOICE_MODE_INSTRUCTION = (
+    "<voice_mode>\n"
+    "Your response will be spoken aloud via text-to-speech, not read on screen. "
+    "Write plain conversational sentences. No markdown, no bullet lists, no "
+    "code blocks, no asterisks, no headers, no special formatting. "
+    "Avoid parenthetical asides. Keep it natural and spoken. "
+    "Numbers: write them as words when short (e.g. 'three' not '3'). "
+    "Don't use abbreviations like 'e.g.' — say 'for example'. "
+    "Keep responses concise — a few sentences at most unless the user asked for detail.\n"
+    "</voice_mode>\n\n"
+)
+
+
 async def stream_claude_response(websocket: WebSocket, session_id: str, user_message: str, claude: ClaudeChat, voice_mode: bool = False):
     ws_live = await _ws_send(websocket, {"type": "assistant_start"})
 
@@ -733,6 +747,51 @@ async def _collect_and_consume_memories(session_id: str) -> Optional[str]:
     return context_prefix
 
 
+def _voice_filler_phrases() -> list[str]:
+    user = settings.user_name
+    return [
+        "Hmm, hang on, let me think.",
+        f"Sure thing {user}, let me noodle on that for a sec.",
+        "One moment, just pulling my thoughts together.",
+        "Let me think on that.",
+        "Give me a sec.",
+        "On it, one moment.",
+        f"Hang on {user}.",
+    ]
+
+
+async def _forward_filler_audio(tts, websocket: WebSocket, session_id: str):
+    """Forward filler TTS audio. Sends audio_end with filler=true so client doesn't treat it as final."""
+    try:
+        async for audio_b64 in tts.audio_chunks():
+            await websocket.send_json({
+                "type": "audio_chunk",
+                "audio": audio_b64,
+            })
+    except Exception:
+        log.exception("tts.filler_forward_error", session_id=session_id)
+    # Signal end of filler audio (not the real end)
+    await websocket.send_json({"type": "audio_end", "filler": True})
+
+
+async def _send_voice_filler(websocket: WebSocket, session_id: str):
+    """Send a quick spoken filler phrase via TTS so there's no awkward silence."""
+    phrase = _random.choice(_voice_filler_phrases())
+    if not settings.elevenlabs_api_key:
+        return
+    try:
+        from app.elevenlabs_tts import ElevenLabsTTS
+        tts = ElevenLabsTTS()
+        await tts.connect()
+        forwarder = asyncio.create_task(_forward_filler_audio(tts, websocket, session_id))
+        await tts.send_text(phrase)
+        await tts.flush()
+        await tts.close()
+        await forwarder
+    except Exception:
+        log.exception("voice_filler.error", session_id=session_id)
+
+
 async def handle_user_message(websocket: WebSocket, session_id: str, user_message: str, claude: ClaudeChat, voice_mode: bool = False):
     await save_message(session_id, "user", user_message)
     log.info("chat.user_message", session_id=session_id, length=len(user_message), voice_mode=voice_mode)
@@ -747,8 +806,13 @@ async def handle_user_message(websocket: WebSocket, session_id: str, user_messag
     session = await get_session(session_id)
     user_messages = [m for m in (session.messages if session else []) if m.role == "user"]
     if len(user_messages) == 1:
+        if voice_mode:
+            # Send a spoken filler while memory search runs to avoid awkward silence
+            filler_task = asyncio.create_task(_send_voice_filler(websocket, session_id))
         await _ws_send(websocket, {"type": "status", "content": "...", "persist": True})
         await on_first_message(session_id)
+        if voice_mode:
+            await filler_task
         await _ws_send(websocket, {"type": "status", "content": ""})
     else:
         asyncio.ensure_future(on_user_message(session_id))
@@ -756,6 +820,8 @@ async def handle_user_message(websocket: WebSocket, session_id: str, user_messag
     try:
         context_prefix = await _collect_and_consume_memories(session_id)
         effective_message = (context_prefix + user_message) if context_prefix else user_message
+        if voice_mode:
+            effective_message = VOICE_MODE_INSTRUCTION + effective_message
         await stream_claude_response(websocket, session_id, effective_message, claude, voice_mode=voice_mode)
     except Exception as e:
         log.exception("chat.handle_error", session_id=session_id, error=str(e))

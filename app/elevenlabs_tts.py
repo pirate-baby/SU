@@ -41,7 +41,8 @@ class ElevenLabsTTS:
         extra_headers = {"xi-api-key": settings.elevenlabs_api_key}
         self._ws = await websockets.connect(url, additional_headers=extra_headers)
 
-        # Send BOS — a blank space with voice settings and generation config
+        # Send BOS — a blank space with voice settings and generation config.
+        # Larger initial chunks reduce stuttering from tiny MP3 fragment decoding.
         bos_message = {
             "text": " ",
             "voice_settings": {
@@ -50,7 +51,7 @@ class ElevenLabsTTS:
                 "speed": 1.0,
             },
             "generation_config": {
-                "chunk_length_schedule": [50, 90, 120, 150],
+                "chunk_length_schedule": [120, 160, 250, 290],
             },
         }
         await self._ws.send(json.dumps(bos_message))
