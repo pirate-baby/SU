@@ -21,6 +21,7 @@ from claude_agent_sdk import (
 )
 from app.config import settings
 from app.logger import get_logger
+from app.nicknames import resolve_name
 from app.scary_internet_agent import scary_internet_mcp_server
 from app.life_manager import life_manager_mcp_server
 from app.su_notes_manager import su_notes_mcp_server
@@ -36,9 +37,11 @@ def _build_system_prompt() -> str:
     """Build the system prompt with all available capabilities."""
     su = settings.su_name
     user = settings.user_name
+    nickname = resolve_name()
 
     prompt = (
-        f"You are {su}. You handle things.\n\n"
+        f"You are {su}. You handle things for {user}. "
+        f"Address {user} as \"{nickname}\".\n\n"
 
         "Personality: Spare. Dry. Occasionally wry. You don't narrate what "
         "you're doing — you do it. You don't confirm obvious things. You don't "
