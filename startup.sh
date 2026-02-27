@@ -182,6 +182,11 @@ if [ -z "$VK_ALLOWED_ORIGINS" ]; then
         ip=$(echo "$ip" | tr -d '[:space:]')
         [ -n "$ip" ] && VK_ORIGINS="$VK_ORIGINS,https://$ip:53187,http://$ip:53187"
     done
+    # Include Tailscale MagicDNS FQDN so VK accepts requests via the .ts.net hostname
+    TS_FQDN_VK=$(tailscale status --json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['Self']['DNSName'].rstrip('.'))" 2>/dev/null || true)
+    if [ -n "$TS_FQDN_VK" ]; then
+        VK_ORIGINS="$VK_ORIGINS,https://$TS_FQDN_VK:53187,https://$TS_FQDN_VK"
+    fi
     VK_ALLOWED_ORIGINS="$VK_ORIGINS"
 fi
 export VK_ALLOWED_ORIGINS
@@ -293,21 +298,66 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Self-signed SSL certificates (for Tailscale / non-localhost access)
+# SSL certificates — prefer Tailscale HTTPS (trusted), fall back to self-signed
 # ---------------------------------------------------------------------------
 SSL_DIR="$SCRIPT_DIR/nginx/ssl"
-if [ ! -f "$SSL_DIR/cert.pem" ] || [ ! -f "$SSL_DIR/key.pem" ]; then
-    echo "Generating self-signed SSL certificates..."
-    mkdir -p "$SSL_DIR"
-    openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
-        -keyout "$SSL_DIR/key.pem" \
-        -out "$SSL_DIR/cert.pem" \
-        -subj "/CN=localhost" \
-        -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
-        2>/dev/null
-    echo "SSL certificates generated at $SSL_DIR/"
-else
-    echo "SSL certificates already exist at $SSL_DIR/"
+mkdir -p "$SSL_DIR"
+
+TS_CERT_OBTAINED=false
+
+# Try to get a real Let's Encrypt certificate via Tailscale.
+# `tailscale cert` issues a trusted cert for the machine's MagicDNS FQDN
+# (e.g. myhost.tailnet-name.ts.net). This makes service workers, push
+# notifications, and other APIs that require trusted HTTPS work without
+# any manual browser/OS trust steps.
+if command -v tailscale &>/dev/null; then
+    TS_FQDN=$(tailscale status --json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['Self']['DNSName'].rstrip('.'))" 2>/dev/null || true)
+    if [ -n "$TS_FQDN" ]; then
+        echo "Requesting Tailscale HTTPS certificate for ${TS_FQDN}..."
+        # tailscale cert may need sudo if the current user is not a Tailscale operator
+        TS_CERT_CMD="tailscale cert"
+        if [ "$(id -u)" -ne 0 ]; then
+            TS_CERT_CMD="sudo tailscale cert"
+        fi
+        if $TS_CERT_CMD \
+            --cert-file "$SSL_DIR/cert.pem" \
+            --key-file "$SSL_DIR/key.pem" \
+            "$TS_FQDN" 2>/dev/null; then
+            TS_CERT_OBTAINED=true
+            echo "Tailscale HTTPS certificate obtained for ${TS_FQDN}"
+        else
+            echo "Warning: tailscale cert failed — is HTTPS enabled in your Tailscale admin console?"
+            echo "  Enable it at: https://login.tailscale.com/admin/dns → HTTPS Certificates"
+        fi
+    fi
+fi
+
+# Fall back to self-signed certificate if Tailscale cert wasn't obtained
+if [ "$TS_CERT_OBTAINED" = false ]; then
+    if [ ! -f "$SSL_DIR/cert.pem" ] || [ ! -f "$SSL_DIR/key.pem" ]; then
+        echo "Generating self-signed SSL certificates..."
+
+        # Build SAN list — always include localhost and loopback, plus any
+        # Tailscale IP so service workers work when accessed remotely.
+        SAN="DNS:localhost,IP:127.0.0.1"
+        TS_IP=$(tailscale ip -4 2>/dev/null || true)
+        if [ -n "$TS_IP" ]; then
+            SAN="${SAN},IP:${TS_IP}"
+            echo "Including Tailscale IP ${TS_IP} in certificate SAN"
+        fi
+
+        openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+            -keyout "$SSL_DIR/key.pem" \
+            -out "$SSL_DIR/cert.pem" \
+            -subj "/CN=localhost" \
+            -addext "subjectAltName=${SAN}" \
+            2>/dev/null
+        echo "Self-signed SSL certificates generated at $SSL_DIR/"
+        echo "Note: Service workers require a trusted certificate. Access via Tailscale"
+        echo "  HTTPS (enable in admin console) or manually trust the cert in your browser."
+    else
+        echo "SSL certificates already exist at $SSL_DIR/"
+    fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -344,8 +394,13 @@ docker compose -f "$SCRIPT_DIR/docker-compose.yml" -f "$SCRIPT_DIR/docker-compos
 echo ""
 echo "Services started successfully! (all processes daemonized)"
 echo ""
-echo "Access the chat at: https://localhost"
-echo "Vibe Kanban running on: https://localhost:53187 (host process via nginx)"
+if [ "$TS_CERT_OBTAINED" = true ] && [ -n "$TS_FQDN" ]; then
+    echo "Access the chat at: https://${TS_FQDN} (trusted Tailscale HTTPS)"
+    echo "Vibe Kanban running on: https://${TS_FQDN}:53187 (host process via nginx)"
+else
+    echo "Access the chat at: https://localhost"
+    echo "Vibe Kanban running on: https://localhost:53187 (host process via nginx)"
+fi
 echo "Playwright MCP server running on: http://localhost:8931/sse"
 echo "Restart server running on: http://localhost:8932/health"
 echo "Proton Bridge (IMAP): localhost:1143 (systemd service — see above)"
