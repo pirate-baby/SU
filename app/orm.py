@@ -79,9 +79,33 @@ class InterjectionRow(Base):
     source: Mapped[Optional[str]] = mapped_column(String, default=None)
     related_task_id: Mapped[Optional[str]] = mapped_column(String, default=None)
     related_event_id: Mapped[Optional[str]] = mapped_column(String, default=None)
+    related_su_note_id: Mapped[Optional[str]] = mapped_column(String, default=None)
+    session_id: Mapped[Optional[str]] = mapped_column(String, default=None)
     status: Mapped[str] = mapped_column(String, default="pending")
     created_at: Mapped[Optional[str]] = mapped_column(String, default=None)
     delivered_at: Mapped[Optional[str]] = mapped_column(String, default=None)
+
+    def to_dict(self) -> dict:
+        return {c.key: getattr(self, c.key) for c in self.__table__.columns}
+
+
+class SuNoteRow(Base):
+    __tablename__ = "su_notes"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    note_type: Mapped[str] = mapped_column(String, default="todo")
+    status: Mapped[str] = mapped_column(String, default="active")
+    priority: Mapped[str] = mapped_column(String, default="normal")
+    activate_after: Mapped[Optional[str]] = mapped_column(String, default=None)
+    related_task_id: Mapped[Optional[str]] = mapped_column(String, default=None)
+    related_interjection_id: Mapped[Optional[str]] = mapped_column(String, default=None)
+    source: Mapped[Optional[str]] = mapped_column(String, default=None)
+    context_json: Mapped[Optional[str]] = mapped_column(Text, default=None)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[Optional[str]] = mapped_column(String, default=None)
+    updated_at: Mapped[Optional[str]] = mapped_column(String, default=None)
+    completed_at: Mapped[Optional[str]] = mapped_column(String, default=None)
 
     def to_dict(self) -> dict:
         return {c.key: getattr(self, c.key) for c in self.__table__.columns}

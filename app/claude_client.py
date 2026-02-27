@@ -23,6 +23,7 @@ from app.config import settings
 from app.logger import get_logger
 from app.scary_internet_agent import scary_internet_mcp_server
 from app.life_manager import life_manager_mcp_server
+from app.su_notes_manager import su_notes_mcp_server
 
 log = get_logger(__name__)
 
@@ -59,6 +60,13 @@ def _build_system_prompt() -> str:
 
         "Life management: tasks (create/update/list/complete/delete), "
         "calendar events, and interjections via life_manager MCP tools.\n\n"
+
+        "Internal notes: You have a private notes-to-self system via "
+        "su_notes_manager MCP tools. Use these to leave yourself reminders, "
+        "track follow-ups, and coordinate with your background daemons. "
+        "For example, if the user mentions something they need to do but "
+        "not right now, create a SU note with an appropriate activate_after "
+        "so your daemon processes will remind them later.\n\n"
 
         "## Website Browsing\n\n"
     )
@@ -146,6 +154,7 @@ class ClaudeChat:
         mcp_servers = {
             "scary_internet": scary_internet_mcp_server,
             "life_manager": life_manager_mcp_server,
+            "su_notes_manager": su_notes_mcp_server,
         }
 
         if settings.playwright_mcp_url:

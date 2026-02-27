@@ -350,6 +350,10 @@ async def delete_event(args: dict[str, Any]) -> dict[str, Any]:
             },
             "related_task_id": {"type": "string"},
             "related_event_id": {"type": "string"},
+            "related_su_note_id": {
+                "type": "string",
+                "description": "Link to the SU note that triggered this interjection",
+            },
         },
         "required": ["content"],
     },
@@ -361,6 +365,7 @@ async def create_interjection(args: dict[str, Any]) -> dict[str, Any]:
         source=args.get("source"),
         related_task_id=args.get("related_task_id"),
         related_event_id=args.get("related_event_id"),
+        related_su_note_id=args.get("related_su_note_id"),
     )
     log.info("life_manager.interjection_created", id=interjection.id,
              urgency=interjection.urgency, source=interjection.source)

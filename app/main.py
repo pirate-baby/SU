@@ -39,7 +39,7 @@ from app.agent_registry import (
     mark_ws_disconnected,
 )
 from app.scheduler import scheduler
-from app.repositories import TaskRepo, EventRepo, InterjectionRepo, PushSubscriptionRepo
+from app.repositories import TaskRepo, EventRepo, InterjectionRepo, PushSubscriptionRepo, SuNoteRepo
 
 log = get_logger(__name__)
 
@@ -141,15 +141,96 @@ async def landing_page(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 
+class SessionNewBody(BaseModel):
+    interjection_id: str | None = None
+    initial_context: str | None = None
+
+
 @app.post("/api/sessions/new", response_model=SessionCreateResponse)
-async def create_new_session():
-    """Create a new chat session."""
+async def create_new_session(body: SessionNewBody | None = None):
+    """Create a new chat session, optionally pre-loaded with context."""
     session_id = await create_session()
     log.info("session.created", session_id=session_id)
+
+    # Pre-load context from interjection + related SU notes
+    if body and body.interjection_id:
+        context = await _build_interjection_context(body.interjection_id)
+        if context:
+            await save_message(session_id, "memory", context)
+        await InterjectionRepo.link_session(body.interjection_id, session_id)
+        log.info("session.linked_interjection",
+                 session_id=session_id, interjection_id=body.interjection_id)
+    elif body and body.initial_context:
+        await save_message(session_id, "memory", body.initial_context)
+
     return SessionCreateResponse(
         session_id=session_id,
         redirect_url=f"/chat/{session_id}"
     )
+
+
+async def _build_interjection_context(interjection_id: str) -> str | None:
+    """Build rich context string from an interjection and its related data."""
+    interjection = await InterjectionRepo.get(interjection_id)
+    if not interjection:
+        return None
+
+    parts: list[str] = []
+    parts.append(f"Interjection: {interjection['content']}")
+    parts.append(f"Source: {interjection.get('source', 'unknown')}")
+    parts.append(f"Urgency: {interjection.get('urgency', 'normal')}")
+
+    # Load related SU note for full context (attempt history, etc.)
+    su_note_id = interjection.get("related_su_note_id")
+    if su_note_id:
+        note = await SuNoteRepo.get(su_note_id)
+        if note:
+            parts.append(f"\nSU's internal note: {note['content']}")
+            parts.append(f"Note priority: {note.get('priority', 'normal')}")
+            parts.append(f"Previous attempts: {note.get('attempts', 0)}")
+            if note.get("context_json"):
+                try:
+                    ctx = json.loads(note["context_json"])
+                    parts.append(f"Context: {json.dumps(ctx, indent=2)}")
+                except (json.JSONDecodeError, TypeError):
+                    parts.append(f"Context: {note['context_json']}")
+
+    # Load related task
+    task_id = interjection.get("related_task_id")
+    if task_id:
+        tasks = await TaskRepo.list(limit=1)
+        for t in tasks:
+            if t.get("id") == task_id:
+                parts.append(
+                    f"\nRelated task: \"{t['title']}\" "
+                    f"(status={t.get('status')}, priority={t.get('priority')}, "
+                    f"due={t.get('due_date', 'none')})"
+                )
+                break
+
+    parts.append(f"\nThe user clicked into this notification to engage with it.")
+    return "\n".join(parts)
+
+
+from fastapi.responses import RedirectResponse
+
+
+@app.get("/api/sessions/from-interjection/{interjection_id}")
+async def create_session_from_interjection(interjection_id: str):
+    """Create a context-rich session from an interjection and redirect to chat."""
+    interjection = await InterjectionRepo.get(interjection_id)
+    if not interjection:
+        raise HTTPException(status_code=404, detail="Interjection not found")
+
+    session_id = await create_session()
+    context = await _build_interjection_context(interjection_id)
+    if context:
+        await save_message(session_id, "memory", context)
+    await InterjectionRepo.link_session(interjection_id, session_id)
+
+    log.info("session.from_interjection",
+             session_id=session_id, interjection_id=interjection_id)
+    return RedirectResponse(url=f"/chat/{session_id}", status_code=303)
 
 
 @app.get("/chat/{session_id}", response_class=HTMLResponse)
@@ -432,7 +513,48 @@ async def api_list_interjections(status: str = "pending", limit: int = 20):
 
 @app.post("/api/interjections/{interjection_id}/dismiss")
 async def api_dismiss_interjection(interjection_id: str):
+    # Dismiss the interjection
     await InterjectionRepo.dismiss(interjection_id)
+
+    # If this interjection has a related SU note, record the dismissal and snooze
+    interjection = await InterjectionRepo.get(interjection_id)
+    if interjection and interjection.get("related_su_note_id"):
+        su_note_id = interjection["related_su_note_id"]
+        note = await SuNoteRepo.get(su_note_id)
+        if note and note.get("status") == "active":
+            # Update context with dismissal record
+            from datetime import datetime, timedelta
+            now = datetime.utcnow()
+            ctx: dict = {}
+            if note.get("context_json"):
+                try:
+                    ctx = json.loads(note["context_json"])
+                except (json.JSONDecodeError, TypeError):
+                    ctx = {}
+            attempts_log = ctx.get("attempts_log", [])
+            attempts_log.append({
+                "date": now.isoformat(),
+                "result": "dismissed",
+                "interjection_id": interjection_id,
+            })
+            ctx["attempts_log"] = attempts_log
+
+            # Snooze: push activate_after forward based on attempts
+            attempts = note.get("attempts", 0)
+            # Escalating snooze: 1 day, 2 days, then 1 day (getting more urgent)
+            snooze_hours = min(48, max(24, 24 * (attempts + 1)))
+            new_activate = (now + timedelta(hours=snooze_hours)).isoformat()
+
+            await SuNoteRepo.update(
+                su_note_id,
+                context_json=json.dumps(ctx),
+                activate_after=new_activate,
+            )
+            await SuNoteRepo.increment_attempts(su_note_id)
+            log.info("interjection.dismiss_snoozed_note",
+                     interjection_id=interjection_id, su_note_id=su_note_id,
+                     snooze_until=new_activate)
+
     return {"dismissed": interjection_id}
 
 

@@ -10,8 +10,8 @@ from typing import Any, Optional
 from sqlalchemy import select, update, delete
 
 from app.database import async_session
-from app.models import Task, Event, Interjection
-from app.orm import TaskRow, EventRow, InterjectionRow, PushSubscriptionRow
+from app.models import Task, Event, Interjection, SuNote
+from app.orm import TaskRow, EventRow, InterjectionRow, PushSubscriptionRow, SuNoteRow
 
 
 def _now() -> str:
@@ -230,14 +230,16 @@ class InterjectionRepo:
         source: Optional[str] = None,
         related_task_id: Optional[str] = None,
         related_event_id: Optional[str] = None,
+        related_su_note_id: Optional[str] = None,
     ) -> Interjection:
         interjection_id = str(uuid.uuid4())
         now = _now()
         row = InterjectionRow(
             id=interjection_id, content=content, urgency=urgency,
             source=source, related_task_id=related_task_id,
-            related_event_id=related_event_id, status="pending",
-            created_at=now,
+            related_event_id=related_event_id,
+            related_su_note_id=related_su_note_id,
+            status="pending", created_at=now,
         )
         async with async_session() as session:
             session.add(row)
@@ -246,7 +248,29 @@ class InterjectionRepo:
             id=interjection_id, content=content, urgency=urgency,
             source=source, related_task_id=related_task_id,
             related_event_id=related_event_id,
+            related_su_note_id=related_su_note_id,
         )
+
+    @staticmethod
+    async def link_session(interjection_id: str, session_id: str) -> None:
+        """Link an interjection to a chat session."""
+        async with async_session() as session:
+            await session.execute(
+                update(InterjectionRow)
+                .where(InterjectionRow.id == interjection_id)
+                .values(session_id=session_id)
+            )
+            await session.commit()
+
+    @staticmethod
+    async def get(interjection_id: str) -> Optional[dict[str, Any]]:
+        """Get a single interjection by ID."""
+        async with async_session() as session:
+            result = await session.execute(
+                select(InterjectionRow).where(InterjectionRow.id == interjection_id)
+            )
+            row = result.scalar_one_or_none()
+            return row.to_dict() if row else None
 
     @staticmethod
     async def list(
@@ -292,6 +316,151 @@ class InterjectionRepo:
                 update(InterjectionRow)
                 .where(InterjectionRow.id == interjection_id)
                 .values(status="dismissed")
+            )
+            await session.commit()
+
+
+# ---------------------------------------------------------------------------
+# SU Notes (internal notes-to-self for daemon coordination)
+# ---------------------------------------------------------------------------
+
+class SuNoteRepo:
+    """CRUD operations for the su_notes table."""
+
+    @staticmethod
+    async def create(
+        content: str,
+        note_type: str = "todo",
+        priority: str = "normal",
+        activate_after: Optional[str] = None,
+        related_task_id: Optional[str] = None,
+        related_interjection_id: Optional[str] = None,
+        source: Optional[str] = None,
+        context_json: Optional[str] = None,
+    ) -> SuNote:
+        note_id = str(uuid.uuid4())
+        now = _now()
+        row = SuNoteRow(
+            id=note_id, content=content, note_type=note_type,
+            status="active", priority=priority,
+            activate_after=activate_after,
+            related_task_id=related_task_id,
+            related_interjection_id=related_interjection_id,
+            source=source, context_json=context_json,
+            attempts=0, created_at=now, updated_at=now,
+        )
+        async with async_session() as session:
+            session.add(row)
+            await session.commit()
+        return SuNote(
+            id=note_id, content=content, note_type=note_type,
+            priority=priority, activate_after=activate_after,
+            related_task_id=related_task_id,
+            related_interjection_id=related_interjection_id,
+            source=source, context_json=context_json,
+        )
+
+    @staticmethod
+    async def get(note_id: str) -> Optional[dict[str, Any]]:
+        """Get a single SU note by ID."""
+        async with async_session() as session:
+            result = await session.execute(
+                select(SuNoteRow).where(SuNoteRow.id == note_id)
+            )
+            row = result.scalar_one_or_none()
+            return row.to_dict() if row else None
+
+    @staticmethod
+    async def update(note_id: str, **fields: Any) -> None:
+        allowed = {"content", "note_type", "status", "priority", "activate_after",
+                    "related_task_id", "related_interjection_id", "context_json", "attempts"}
+        values: dict[str, Any] = {}
+        for key, val in fields.items():
+            if key in allowed:
+                values[key] = val
+        if not values:
+            return
+        if fields.get("status") == "done":
+            values["completed_at"] = _now()
+        values["updated_at"] = _now()
+        async with async_session() as session:
+            await session.execute(
+                update(SuNoteRow).where(SuNoteRow.id == note_id).values(**values)
+            )
+            await session.commit()
+
+    @staticmethod
+    async def complete(note_id: str) -> None:
+        now = _now()
+        async with async_session() as session:
+            await session.execute(
+                update(SuNoteRow)
+                .where(SuNoteRow.id == note_id)
+                .values(status="done", completed_at=now, updated_at=now)
+            )
+            await session.commit()
+
+    @staticmethod
+    async def delete(note_id: str) -> None:
+        async with async_session() as session:
+            await session.execute(
+                delete(SuNoteRow).where(SuNoteRow.id == note_id)
+            )
+            await session.commit()
+
+    @staticmethod
+    async def list_active_due(
+        now_iso: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Return active notes whose activate_after has passed (or is NULL)."""
+        if now_iso is None:
+            now_iso = _now()
+        stmt = (
+            select(SuNoteRow)
+            .where(SuNoteRow.status == "active")
+            .where(
+                (SuNoteRow.activate_after.is_(None)) |
+                (SuNoteRow.activate_after <= now_iso)
+            )
+            .order_by(SuNoteRow.priority.desc(), SuNoteRow.created_at.asc())
+            .limit(limit)
+        )
+        async with async_session() as session:
+            result = await session.execute(stmt)
+            return [row.to_dict() for row in result.scalars().all()]
+
+    @staticmethod
+    async def list(
+        *,
+        status: Optional[str] = None,
+        note_type: Optional[str] = None,
+        source: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        stmt = select(SuNoteRow)
+        if status:
+            stmt = stmt.where(SuNoteRow.status == status)
+        if note_type:
+            stmt = stmt.where(SuNoteRow.note_type == note_type)
+        if source:
+            stmt = stmt.where(SuNoteRow.source == source)
+        stmt = stmt.order_by(SuNoteRow.created_at.desc()).limit(limit)
+        async with async_session() as session:
+            result = await session.execute(stmt)
+            return [row.to_dict() for row in result.scalars().all()]
+
+    @staticmethod
+    async def increment_attempts(note_id: str) -> None:
+        """Increment the attempts counter and update timestamp."""
+        async with async_session() as session:
+            await session.execute(
+                update(SuNoteRow)
+                .where(SuNoteRow.id == note_id)
+                .values(
+                    attempts=SuNoteRow.attempts + 1,
+                    updated_at=_now(),
+                )
             )
             await session.commit()
 

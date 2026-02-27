@@ -34,16 +34,27 @@ self.addEventListener("notificationclick", (event) => {
   event.notification.close();
 
   const url = event.notification.data?.url || "/";
+  const isInterjectionLink = url.includes("/from-interjection/");
 
   event.waitUntil(
     clients.matchAll({ type: "window", includeUncontrolled: true }).then((windowClients) => {
-      // Focus an existing tab if one is open
+      // For interjection links, always open a new contextified session
+      if (isInterjectionLink) {
+        // Navigate an existing tab if one is open, otherwise open new
+        for (const client of windowClients) {
+          if (client.url.includes(self.location.origin) && "navigate" in client) {
+            return client.navigate(url).then((c) => c.focus());
+          }
+        }
+        return clients.openWindow(url);
+      }
+
+      // For generic URLs, focus an existing tab if one is open
       for (const client of windowClients) {
         if (client.url.includes(self.location.origin) && "focus" in client) {
           return client.focus();
         }
       }
-      // Otherwise open a new tab
       return clients.openWindow(url);
     })
   );

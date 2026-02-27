@@ -153,6 +153,10 @@
         fetchInterjections();
     }
 
+    function chatAboutInterjection(id) {
+        window.location.href = `/api/sessions/from-interjection/${id}`;
+    }
+
     // ---- Render: Tasks ----
 
     function renderTasks() {
@@ -308,10 +312,14 @@
             <div class="interjection-item">
                 <span class="urgency-dot urgency-${ij.urgency || 'normal'}"></span>
                 <span class="content">${escapeHtml(ij.content)}</span>
+                <button class="chat-btn" data-id="${ij.id}" title="Chat about this">&#x1F4AC;</button>
                 <button class="dismiss-btn" data-id="${ij.id}" title="Dismiss">&times;</button>
             </div>
         `).join('');
 
+        interjectionList.querySelectorAll('.chat-btn').forEach(btn => {
+            btn.addEventListener('click', () => chatAboutInterjection(btn.dataset.id));
+        });
         interjectionList.querySelectorAll('.dismiss-btn').forEach(btn => {
             btn.addEventListener('click', () => dismissInterjection(btn.dataset.id));
         });

@@ -79,6 +79,25 @@ class Interjection(BaseModel):
     source: Optional[str] = None
     related_task_id: Optional[str] = None
     related_event_id: Optional[str] = None
+    related_su_note_id: Optional[str] = None
+    session_id: Optional[str] = None
     status: str = "pending"
     created_at: Optional[datetime] = None
     delivered_at: Optional[datetime] = None
+
+
+class SuNote(BaseModel):
+    id: Optional[str] = None
+    content: str
+    note_type: str = "todo"
+    status: str = "active"
+    priority: str = "normal"
+    activate_after: Optional[str] = None
+    related_task_id: Optional[str] = None
+    related_interjection_id: Optional[str] = None
+    source: Optional[str] = None
+    context_json: Optional[str] = None
+    attempts: int = 0
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None

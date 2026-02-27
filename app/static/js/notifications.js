@@ -1,30 +1,41 @@
 /*
  * Push notification registration for SU.
  *
- * Registers the service worker, requests notification permission,
- * subscribes to Web Push, and sends the subscription to the backend.
+ * Registers the service worker on page load (allowed without gesture).
+ * Permission request and push subscription happen on the first user
+ * interaction, since modern browsers silently block requestPermission()
+ * calls that aren't triggered by a user gesture.
  */
 
-const VAPID_PUBLIC_KEY_META = document.querySelector('meta[name="vapid-public-key"]');
+let _swRegistration = null;
+let _pushSubscribed = false;
 
-async function initNotifications() {
+async function registerServiceWorker() {
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
         console.log("Push notifications not supported in this browser");
         return;
     }
 
     try {
-        const registration = await navigator.serviceWorker.register("/static/sw.js");
-        console.log("Service worker registered:", registration.scope);
+        _swRegistration = await navigator.serviceWorker.register("/static/sw.js");
+        console.log("Service worker registered:", _swRegistration.scope);
 
         // Check if we already have a subscription
-        const existing = await registration.pushManager.getSubscription();
+        const existing = await _swRegistration.pushManager.getSubscription();
         if (existing) {
             console.log("Push subscription already active");
-            return;
+            _pushSubscribed = true;
         }
+    } catch (err) {
+        console.error("Service worker registration failed:", err);
+    }
+}
 
-        // Request permission
+async function requestPushPermission() {
+    if (_pushSubscribed || !_swRegistration) return;
+
+    try {
+        // This must be called from a user gesture (click/tap)
         const permission = await Notification.requestPermission();
         if (permission !== "granted") {
             console.log("Notification permission denied");
@@ -44,7 +55,7 @@ async function initNotifications() {
         const applicationServerKey = urlBase64ToUint8Array(public_key);
 
         // Subscribe
-        const subscription = await registration.pushManager.subscribe({
+        const subscription = await _swRegistration.pushManager.subscribe({
             userVisibleOnly: true,
             applicationServerKey,
         });
@@ -56,9 +67,10 @@ async function initNotifications() {
             body: JSON.stringify(subscription.toJSON()),
         });
 
+        _pushSubscribed = true;
         console.log("Push notifications enabled");
     } catch (err) {
-        console.error("Failed to initialize push notifications:", err);
+        console.error("Failed to subscribe to push notifications:", err);
     }
 }
 
@@ -73,5 +85,11 @@ function urlBase64ToUint8Array(base64String) {
     return outputArray;
 }
 
-// Auto-initialize when the script loads
-initNotifications();
+// Register service worker on load (no gesture needed)
+registerServiceWorker();
+
+// Request permission on first user click anywhere on the page
+document.addEventListener("click", function onFirstClick() {
+    document.removeEventListener("click", onFirstClick);
+    requestPushPermission();
+}, { once: true });

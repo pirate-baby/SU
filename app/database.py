@@ -178,6 +178,49 @@ async def init_database():
             ON interjections(status)
         """)
 
+        # -- SU notes (internal notes-to-self for daemon coordination) --
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS su_notes (
+                id TEXT PRIMARY KEY,
+                content TEXT NOT NULL,
+                note_type TEXT DEFAULT 'todo',
+                status TEXT DEFAULT 'active',
+                priority TEXT DEFAULT 'normal',
+                activate_after TEXT,
+                related_task_id TEXT,
+                related_interjection_id TEXT,
+                source TEXT,
+                context_json TEXT,
+                attempts INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                completed_at TIMESTAMP
+            )
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_su_notes_status_activate
+            ON su_notes(status, activate_after)
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_su_notes_source
+            ON su_notes(source)
+        """)
+
+        # -- Interjection session_id column (links interjection → chat session) --
+        # SQLite doesn't support IF NOT EXISTS for ALTER TABLE, so we check first.
+        cursor = await db.execute("PRAGMA table_info(interjections)")
+        columns = {row[1] for row in await cursor.fetchall()}
+        if "session_id" not in columns:
+            await db.execute(
+                "ALTER TABLE interjections ADD COLUMN session_id TEXT"
+            )
+        if "related_su_note_id" not in columns:
+            await db.execute(
+                "ALTER TABLE interjections ADD COLUMN related_su_note_id TEXT"
+            )
+
         # -- Push subscriptions (Web Push / VAPID) --
         await db.execute("""
             CREATE TABLE IF NOT EXISTS push_subscriptions (

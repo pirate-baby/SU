@@ -31,12 +31,13 @@ async def send_push_notification(interjection: dict[str, Any]) -> int:
     if not subscriptions:
         return 0
 
+    interjection_id = interjection["id"]
     payload = json.dumps({
         "title": "SU",
         "body": interjection["content"],
-        "tag": f"interjection-{interjection['id']}",
-        "interjection_id": interjection["id"],
-        "url": "/",
+        "tag": f"interjection-{interjection_id}",
+        "interjection_id": interjection_id,
+        "url": f"/api/sessions/from-interjection/{interjection_id}",
     })
 
     vapid_claims = {"sub": f"mailto:{settings.vapid_claims_email}"}
