@@ -125,23 +125,58 @@ User=proton
 ExecStart=/usr/bin/protonmail-bridge --noninteractive
 Restart=on-failure
 RestartSec=5
-# Bridge listens on localhost by default:
-#   IMAP: 1143   SMTP: 1025
+# Bridge listens on 127.0.0.1 by default (IMAP:1143, SMTP:1025).
+# The Docker container reaches the host via host.docker.internal which
+# resolves to the Docker bridge gateway — NOT 127.0.0.1. We use socat
+# sidecars (below) to forward from 0.0.0.0 to Bridge's localhost ports.
 Environment=HOME=/home/proton
 
 [Install]
 WantedBy=multi-user.target
 UNIT
 
+# Socat port-forwarding services — bridge Docker's host.docker.internal
+# to Proton Bridge's localhost-only listeners.
+# Docker containers reach the host via the bridge gateway IP (e.g. 172.17.0.1).
+# Proton Bridge only binds to 127.0.0.1, so we forward 0.0.0.0:port → 127.0.0.1:port.
+for PROTO_PORT in "imap:1143" "smtp:1025"; do
+    PROTO="${PROTO_PORT%%:*}"
+    PORT="${PROTO_PORT##*:}"
+    cat > "/etc/systemd/system/proton-bridge-${PROTO}-forward.service" <<FWDUNIT
+[Unit]
+Description=Proton Bridge ${PROTO^^} port forward (0.0.0.0:${PORT} → 127.0.0.1:${PORT})
+After=proton-bridge.service
+Requires=proton-bridge.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/socat TCP-LISTEN:${PORT},bind=0.0.0.0,reuseaddr,fork TCP:127.0.0.1:${PORT}
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+FWDUNIT
+done
+
+# Install socat if not present
+if ! command -v socat &>/dev/null; then
+    apt-get install -y socat
+    echo "socat installed (needed for Proton Bridge port forwarding)"
+fi
+
 systemctl daemon-reload
-echo "Proton Bridge systemd service installed"
+echo "Proton Bridge systemd service installed (with IMAP/SMTP port forwarding for Docker)"
 echo ""
 echo "  IMPORTANT: Before starting the service, log in interactively as the proton user:"
 echo "    sudo -u proton /usr/bin/protonmail-bridge -c"
 echo "    > login      (follow prompts)"
 echo "    > list       (verify account appears)"
 echo "    > exit"
-echo "  Then: sudo systemctl enable --now proton-bridge"
+echo "  Then:"
+echo "    sudo systemctl enable --now proton-bridge"
+echo "    sudo systemctl enable --now proton-bridge-imap-forward"
+echo "    sudo systemctl enable --now proton-bridge-smtp-forward"
 echo ""
 
 echo "=== 5/6  Git config ==="
@@ -168,6 +203,8 @@ echo "    2. Log in to Proton Bridge (if using ProtonMail):"
 echo "         sudo -u proton /usr/bin/protonmail-bridge -c"
 echo "         > login   > list   > exit"
 echo "         sudo systemctl enable --now proton-bridge"
+echo "         sudo systemctl enable --now proton-bridge-imap-forward"
+echo "         sudo systemctl enable --now proton-bridge-smtp-forward"
 echo "    3. cp .env.example .env && vim .env"
 echo "    4. bash startup.sh"
 echo "========================================="

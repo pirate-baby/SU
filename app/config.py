@@ -25,10 +25,10 @@ class Settings(BaseSettings):
     # Get it from: Proton Bridge app → Settings → Mailbox Password
     protonmail_username: Optional[str] = None
     protonmail_password: Optional[str] = None
-    protonmail_smtp_host: str = "127.0.0.1"  # Proton Bridge SMTP
-    protonmail_smtp_port: int = 1025          # Proton Bridge SMTP port
-    protonmail_imap_host: str = "127.0.0.1"  # Proton Bridge IMAP (not localhost — avoids IPv6)
-    protonmail_imap_port: int = 1143          # Proton Bridge IMAP port
+    protonmail_smtp_host: str = "host.docker.internal"  # Proton Bridge on Docker host
+    protonmail_smtp_port: int = 1025                    # Proton Bridge SMTP port
+    protonmail_imap_host: str = "host.docker.internal"  # Proton Bridge on Docker host
+    protonmail_imap_port: int = 1143                    # Proton Bridge IMAP port
 
     # ElevenLabs Voice Mode
     elevenlabs_api_key: Optional[str] = None

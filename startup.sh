@@ -288,9 +288,23 @@ EOF
 # If the service is not running, IMAP email features will be unavailable.
 if systemctl is-active proton-bridge &>/dev/null; then
     echo "Proton Bridge service is running (IMAP on localhost:1143)"
+    # Check port-forwarding services (needed for Docker container access)
+    FORWARD_OK=true
+    for SVC in proton-bridge-imap-forward proton-bridge-smtp-forward; do
+        if ! systemctl is-active "$SVC" &>/dev/null; then
+            echo "  Warning: $SVC is not running — Docker container cannot reach Proton Bridge."
+            echo "    To fix: sudo systemctl enable --now $SVC"
+            FORWARD_OK=false
+        fi
+    done
+    if [ "$FORWARD_OK" = true ]; then
+        echo "  Port forwarding active (Docker can reach IMAP:1143, SMTP:1025 via host.docker.internal)"
+    fi
 elif pgrep -f 'protonmail-bridge' &>/dev/null; then
     echo "Proton Bridge is running outside systemd (IMAP on localhost:1143)"
     echo "  Consider using: sudo systemctl start proton-bridge"
+    echo "  Warning: Docker container may not reach Bridge without port forwarding."
+    echo "  See provision.sh for socat forwarding setup."
 elif systemctl list-unit-files proton-bridge.service 2>/dev/null | grep -q proton-bridge; then
     echo "Warning: Proton Bridge service is installed but not running."
     echo "  To start: sudo systemctl start proton-bridge"
