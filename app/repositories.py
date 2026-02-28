@@ -4,7 +4,6 @@ Repository layer: SQLAlchemy ORM-based CRUD for tasks, events, and interjections
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
 from typing import Any, Optional
 
 from sqlalchemy import select, update, delete
@@ -12,10 +11,11 @@ from sqlalchemy import select, update, delete
 from app.database import async_session
 from app.models import Task, Event, Interjection, SuNote
 from app.orm import TaskRow, EventRow, InterjectionRow, SuNoteRow
+from app.tz import now_iso
 
 
 def _now() -> str:
-    return datetime.utcnow().isoformat()
+    return now_iso()
 
 
 # ---------------------------------------------------------------------------

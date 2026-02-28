@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from typing import Any, Callable, Coroutine, Optional
 
 from app.config import settings
+from app.tz import now as local_now
 from app.daemon_registry import (
     daemon_registry, DaemonInfo, DaemonCategory, RunStatus,
 )
@@ -80,7 +81,7 @@ class Scheduler:
             display_name="Daily Review",
             category=DaemonCategory.SCHEDULER,
             interval_seconds=3600,
-            condition="Once/day, 6-9am UTC",
+            condition="Once/day, 6-9am Eastern",
             description="Composes morning brief from tasks, events, and notes",
         ))
 
@@ -156,7 +157,7 @@ class Scheduler:
 
     async def _calendar_check(self) -> None:
         """Check for upcoming events, spawn a subagent to compose reminders."""
-        now = datetime.utcnow()
+        now = local_now()
         rows = await EventRepo.upcoming_within_window(now)
 
         events_to_remind: list[dict[str, Any]] = []
@@ -442,7 +443,7 @@ class Scheduler:
                 f"attempts={note['attempts']}): {note['content']}{related}{ctx}"
             )
 
-        now = datetime.utcnow()
+        now = local_now()
         nickname = resolve_name("note_processor")
         prompt = (
             f"Current time: {now.isoformat()}\n\n"
@@ -543,7 +544,7 @@ class Scheduler:
         from app.su_notes_manager import su_notes_mcp_server
         from app.process_limiter import claude_process_slot
 
-        now = datetime.utcnow()
+        now = local_now()
         nickname = resolve_name("email_scanner")
         prompt = (
             f"Current time: {now.isoformat()}\n\n"
@@ -647,15 +648,15 @@ class Scheduler:
     _last_daily_review_date: Optional[str] = None
 
     async def _daily_review(self) -> None:
-        """Run daily review — once per day, targeting morning hours."""
-        now = datetime.utcnow()
+        """Run daily review — once per day, targeting morning hours (Eastern)."""
+        now = local_now()
         today = now.strftime("%Y-%m-%d")
 
         # Only run once per day
         if self._last_daily_review_date == today:
             return
 
-        # Only run between 6am and 9am (rough heuristic — UTC may need adjustment)
+        # Only run between 6am and 9am Eastern
         if now.hour < 6 or now.hour >= 9:
             return
 
@@ -675,7 +676,7 @@ class Scheduler:
         from app.su_notes_manager import su_notes_mcp_server
         from app.process_limiter import claude_process_slot
 
-        now = datetime.utcnow()
+        now = local_now()
         nickname = resolve_name("morning_greeting")
         prompt = (
             f"Current time: {now.isoformat()}\n\n"

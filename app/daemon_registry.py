@@ -16,6 +16,7 @@ from enum import Enum
 from typing import Any, Optional
 
 from app.logger import get_logger
+from app.tz import now_iso
 
 log = get_logger(__name__)
 
@@ -95,7 +96,7 @@ async def _update_run(record: RunRecord) -> None:
 async def cleanup_stale_runs() -> None:
     """Mark any runs still 'running' in the DB as failed (process restart)."""
     from app.database import get_db
-    now = datetime.now(timezone.utc).isoformat()
+    now = now_iso()
     async with get_db() as db:
         await db.execute(
             """UPDATE daemon_runs
@@ -164,7 +165,7 @@ class DaemonRegistry:
     async def start_run(self, daemon_name: str, **metadata: Any) -> str:
         """Record that a daemon run has started.  Returns run_id."""
         run_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).isoformat()
+        now = now_iso()
         record = RunRecord(
             id=run_id,
             daemon_name=daemon_name,
@@ -186,7 +187,7 @@ class DaemonRegistry:
         error: Optional[str] = None,
     ) -> None:
         """Record that a daemon run has ended."""
-        now = datetime.now(timezone.utc).isoformat()
+        now = now_iso()
         runs = self._current_runs.get(daemon_name, {})
         record = runs.pop(run_id, None)
         if not runs:

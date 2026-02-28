@@ -669,8 +669,9 @@ async def api_dismiss_interjection(interjection_id: str):
         note = await SuNoteRepo.get(su_note_id)
         if note and note.get("status") == "active":
             # Update context with dismissal record
-            from datetime import datetime, timedelta
-            now = datetime.utcnow()
+            from datetime import timedelta
+            from app.tz import now as local_now
+            now = local_now()
             ctx: dict = {}
             if note.get("context_json"):
                 try:

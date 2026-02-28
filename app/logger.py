@@ -23,6 +23,8 @@ import sys
 import time
 import traceback
 from datetime import datetime, timezone
+
+from app.tz import LOCAL_TZ
 from typing import Any, Optional
 
 # ---------------------------------------------------------------------------
@@ -122,7 +124,7 @@ class _JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         entry = {
             "timestamp": datetime.fromtimestamp(
-                record.created, tz=timezone.utc
+                record.created, tz=LOCAL_TZ
             ).isoformat(),
             "level": record.levelname.lower(),
             "event": record.getMessage(),
@@ -205,7 +207,7 @@ class StructuredLogger:
         if _log_queue is not None:
             entry = {
                 "timestamp": datetime.fromtimestamp(
-                    record.created, tz=timezone.utc
+                    record.created, tz=LOCAL_TZ
                 ).isoformat(),
                 "level": logging.getLevelName(level).lower(),
                 "event": event,

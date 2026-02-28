@@ -22,6 +22,7 @@ from claude_agent_sdk import (
 from app.config import settings
 from app.logger import get_logger
 from app.nicknames import resolve_name
+from app.tz import now as local_now
 from app.scary_internet_agent import scary_internet_mcp_server
 from app.life_manager import life_manager_mcp_server
 from app.su_notes_manager import su_notes_mcp_server
@@ -40,9 +41,14 @@ def _build_system_prompt() -> str:
     user = settings.user_name
     nickname = resolve_name()
 
+    t = local_now()
+
     prompt = (
         f"You are {su}. You handle things for {user}. "
         f"Address {user} as \"{nickname}\".\n\n"
+
+        f"Current time: {t.strftime('%A, %B %-d, %Y %I:%M %p %Z')} "
+        f"(Brooklyn, NY)\n\n"
 
         "Personality: Spare. Dry. Occasionally wry. You don't narrate what "
         "you're doing — you do it. You don't confirm obvious things. You don't "
