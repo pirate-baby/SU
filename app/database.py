@@ -245,13 +245,14 @@ async def init_database():
             ON daemon_runs(status)
         """)
 
-        # -- Push subscriptions (Web Push / VAPID) --
+        # -- Telegram users --
         await db.execute("""
-            CREATE TABLE IF NOT EXISTS push_subscriptions (
+            CREATE TABLE IF NOT EXISTS telegram_users (
                 id TEXT PRIMARY KEY,
-                endpoint TEXT NOT NULL UNIQUE,
-                subscription_json TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                telegram_chat_id INTEGER NOT NULL UNIQUE,
+                telegram_user_id INTEGER NOT NULL,
+                telegram_username TEXT,
+                registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
 

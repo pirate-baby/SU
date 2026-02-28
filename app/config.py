@@ -35,10 +35,10 @@ class Settings(BaseSettings):
     elevenlabs_voice_id: Optional[str] = None
     elevenlabs_tts_model: str = "eleven_flash_v2_5"
 
-    # Web Push (VAPID)
-    vapid_private_key: Optional[str] = None
-    vapid_public_key: Optional[str] = None
-    vapid_claims_email: Optional[str] = None
+    # Telegram Bot
+    telegram_bot_token: Optional[str] = None
+    telegram_webhook_secret: Optional[str] = None
+    app_host: str = "localhost"
 
     model_config = SettingsConfigDict(
         env_file=".env",

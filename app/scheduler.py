@@ -58,7 +58,7 @@ class Scheduler:
             display_name="Interjection Delivery",
             category=DaemonCategory.SCHEDULER,
             interval_seconds=60,
-            description="Pushes pending interjections to WebSocket/Web Push",
+            description="Pushes pending interjections to WebSocket/Telegram",
         ))
         daemon_registry.register(DaemonInfo(
             name="note_processor",
@@ -234,17 +234,25 @@ class Scheduler:
             "Be terse. Headless — no clarifying questions."
         )
 
+        mcp_servers = {
+            "basic_memory": get_basic_memory_mcp_config(),
+            "life_manager": life_manager_mcp_server,
+        }
+        allowed = [
+            "mcp__basic_memory__search_notes",
+            "mcp__basic_memory__read_note",
+            "mcp__life_manager__create_interjection",
+            "mcp__life_manager__list_tasks",
+        ]
+
+        if settings.telegram_bot_token:
+            from app.telegram_messenger import telegram_messenger_mcp_server
+            mcp_servers["telegram_messenger"] = telegram_messenger_mcp_server
+            allowed.append("mcp__telegram_messenger__send_telegram_message")
+
         options = ClaudeAgentOptions(
-            mcp_servers={
-                "basic_memory": get_basic_memory_mcp_config(),
-                "life_manager": life_manager_mcp_server,
-            },
-            allowed_tools=[
-                "mcp__basic_memory__search_notes",
-                "mcp__basic_memory__read_note",
-                "mcp__life_manager__create_interjection",
-                "mcp__life_manager__list_tasks",
-            ],
+            mcp_servers=mcp_servers,
+            allowed_tools=allowed,
             disallowed_tools=[
                 "Task", "Bash", "Glob", "Grep", "Read", "Edit", "Write",
                 "WebFetch", "WebSearch", "NotebookEdit",
@@ -292,9 +300,8 @@ class Scheduler:
         """Push pending interjections to connected clients.
 
         Delivers via WebSocket for real-time in-page updates AND via
-        Web Push for native OS notifications. Both channels fire so
-        the user gets a notification even when the tab is open but
-        not in focus.
+        Telegram for native phone notifications. Interjections with
+        urgency='call' trigger the phone-call flow instead.
         """
         if not self._push_fn:
             return
@@ -305,28 +312,88 @@ class Scheduler:
 
         for item in items:
             try:
+                # Call-urgency interjections use the phone-call flow
+                if item.get("urgency") == "call":
+                    await self._deliver_call_interjection(item)
+                    await InterjectionRepo.mark_delivered(item["id"])
+                    continue
+
                 ws_delivered = await self._push_fn(item)
 
-                # Always send Web Push so the user gets a native OS
-                # notification (banner / phone alert) regardless of
-                # whether a WebSocket tab is open.
-                push_delivered = 0
+                # Send via Telegram so the user gets a phone notification
+                # regardless of whether a browser tab is open.
+                tg_delivered = 0
                 try:
-                    from app.push_service import send_push_notification
-                    push_delivered = await send_push_notification(item)
+                    from app.telegram_bot import deliver_interjection_via_telegram
+                    tg_delivered = await deliver_interjection_via_telegram(item)
                 except Exception:
-                    log.exception("scheduler.web_push_failed", id=item["id"])
+                    log.exception("scheduler.telegram_delivery_failed", id=item["id"])
 
                 await InterjectionRepo.mark_delivered(item["id"])
                 log.info(
                     "scheduler.interjection_delivered",
                     id=item["id"],
                     ws_delivered=ws_delivered,
-                    push_delivered=push_delivered,
+                    tg_delivered=tg_delivered,
                 )
             except Exception:
                 log.exception("scheduler.interjection_push_failed", id=item["id"])
                 break
+
+    async def _deliver_call_interjection(self, item: dict[str, Any]) -> None:
+        """Deliver a call-urgency interjection as a phone call.
+
+        1. Pre-creates a session with interjection context as memory.
+        2. Pushes `incoming_call` via WebSocket if a client is connected.
+        3. Sends Telegram message with inline "Answer Call" button deep-linking
+           to /call/{session_id}.
+        """
+        from app.session_manager import create_session, save_message
+
+        # Pre-create session with context
+        session_id = await create_session()
+        context = item.get("content", "")
+        await save_message(session_id, "memory", (
+            f"<context>\nSU initiated a call.\n"
+            f"Reason: {context}\n"
+            f"Source: {item.get('source', 'unknown')}\n"
+            f"</context>"
+        ))
+        await InterjectionRepo.link_session(item["id"], session_id)
+
+        # Push via WebSocket
+        ws_delivered = 0
+        try:
+            from app.main import push_incoming_call_to_clients
+            ws_delivered = await push_incoming_call_to_clients(session_id, context)
+        except Exception:
+            log.exception("scheduler.call_ws_push_failed", id=item["id"])
+
+        # Send Telegram notification with "Answer Call" deep link
+        tg_delivered = 0
+        if settings.telegram_bot_token and settings.app_host and settings.app_host != "localhost":
+            try:
+                from app.telegram_bot import send_call_notification
+                from app.telegram_users import TelegramUserRepo
+                call_url = f"https://{settings.app_host}/call/{session_id}"
+                users = await TelegramUserRepo.list_all()
+                for user in users:
+                    if await send_call_notification(
+                        user["telegram_chat_id"],
+                        context[:200],
+                        call_url,
+                    ):
+                        tg_delivered += 1
+            except Exception:
+                log.exception("scheduler.call_telegram_failed", id=item["id"])
+
+        log.info(
+            "scheduler.call_interjection_delivered",
+            id=item["id"],
+            session_id=session_id,
+            ws_delivered=ws_delivered,
+            tg_delivered=tg_delivered,
+        )
 
     # ------------------------------------------------------------------
     # Note Processor: process SU's internal notes-to-self
@@ -405,24 +472,32 @@ class Scheduler:
             "Headless — no clarifying questions."
         )
 
+        mcp_servers = {
+            "basic_memory": get_basic_memory_mcp_config(),
+            "life_manager": life_manager_mcp_server,
+            "su_notes_manager": su_notes_mcp_server,
+        }
+        allowed = [
+            "mcp__basic_memory__search_notes",
+            "mcp__basic_memory__read_note",
+            "mcp__life_manager__create_interjection",
+            "mcp__life_manager__list_interjections",
+            "mcp__life_manager__list_tasks",
+            "mcp__life_manager__list_events",
+            "mcp__su_notes_manager__get_su_note",
+            "mcp__su_notes_manager__update_su_note",
+            "mcp__su_notes_manager__complete_su_note",
+            "mcp__su_notes_manager__create_su_note",
+        ]
+
+        if settings.telegram_bot_token:
+            from app.telegram_messenger import telegram_messenger_mcp_server
+            mcp_servers["telegram_messenger"] = telegram_messenger_mcp_server
+            allowed.append("mcp__telegram_messenger__send_telegram_message")
+
         options = ClaudeAgentOptions(
-            mcp_servers={
-                "basic_memory": get_basic_memory_mcp_config(),
-                "life_manager": life_manager_mcp_server,
-                "su_notes_manager": su_notes_mcp_server,
-            },
-            allowed_tools=[
-                "mcp__basic_memory__search_notes",
-                "mcp__basic_memory__read_note",
-                "mcp__life_manager__create_interjection",
-                "mcp__life_manager__list_interjections",
-                "mcp__life_manager__list_tasks",
-                "mcp__life_manager__list_events",
-                "mcp__su_notes_manager__get_su_note",
-                "mcp__su_notes_manager__update_su_note",
-                "mcp__su_notes_manager__complete_su_note",
-                "mcp__su_notes_manager__create_su_note",
-            ],
+            mcp_servers=mcp_servers,
+            allowed_tools=allowed,
             disallowed_tools=[
                 "Task", "Bash", "Glob", "Grep", "Read", "Edit", "Write",
                 "WebFetch", "WebSearch", "NotebookEdit",
@@ -508,30 +583,38 @@ class Scheduler:
             },
         }
 
+        mcp_servers = {
+            "basic_memory": get_basic_memory_mcp_config(),
+            "life_manager": life_manager_mcp_server,
+            "su_notes_manager": su_notes_mcp_server,
+            "protonmail": protonmail_mcp,
+        }
+        allowed = [
+            "mcp__protonmail__list_emails",
+            "mcp__protonmail__read_email",
+            "mcp__protonmail__search_emails",
+            "mcp__protonmail__move_email",
+            "mcp__protonmail__list_folders",
+            "mcp__basic_memory__search_notes",
+            "mcp__basic_memory__read_note",
+            "mcp__life_manager__create_task",
+            "mcp__life_manager__list_tasks",
+            "mcp__life_manager__create_event",
+            "mcp__life_manager__list_events",
+            "mcp__life_manager__create_interjection",
+            "mcp__su_notes_manager__create_su_note",
+            "mcp__su_notes_manager__list_su_notes",
+            "mcp__su_notes_manager__update_su_note",
+        ]
+
+        if settings.telegram_bot_token:
+            from app.telegram_messenger import telegram_messenger_mcp_server
+            mcp_servers["telegram_messenger"] = telegram_messenger_mcp_server
+            allowed.append("mcp__telegram_messenger__send_telegram_message")
+
         options = ClaudeAgentOptions(
-            mcp_servers={
-                "basic_memory": get_basic_memory_mcp_config(),
-                "life_manager": life_manager_mcp_server,
-                "su_notes_manager": su_notes_mcp_server,
-                "protonmail": protonmail_mcp,
-            },
-            allowed_tools=[
-                "mcp__protonmail__list_emails",
-                "mcp__protonmail__read_email",
-                "mcp__protonmail__search_emails",
-                "mcp__protonmail__move_email",
-                "mcp__protonmail__list_folders",
-                "mcp__basic_memory__search_notes",
-                "mcp__basic_memory__read_note",
-                "mcp__life_manager__create_task",
-                "mcp__life_manager__list_tasks",
-                "mcp__life_manager__create_event",
-                "mcp__life_manager__list_events",
-                "mcp__life_manager__create_interjection",
-                "mcp__su_notes_manager__create_su_note",
-                "mcp__su_notes_manager__list_su_notes",
-                "mcp__su_notes_manager__update_su_note",
-            ],
+            mcp_servers=mcp_servers,
+            allowed_tools=allowed,
             disallowed_tools=[
                 "Task", "Bash", "Glob", "Grep", "Read", "Edit", "Write",
                 "WebFetch", "WebSearch", "NotebookEdit",
@@ -617,20 +700,28 @@ class Scheduler:
             "Headless — no clarifying questions."
         )
 
+        mcp_servers = {
+            "basic_memory": get_basic_memory_mcp_config(),
+            "life_manager": life_manager_mcp_server,
+            "su_notes_manager": su_notes_mcp_server,
+        }
+        allowed = [
+            "mcp__basic_memory__search_notes",
+            "mcp__basic_memory__recent_activity",
+            "mcp__life_manager__list_tasks",
+            "mcp__life_manager__list_events",
+            "mcp__life_manager__create_interjection",
+            "mcp__su_notes_manager__list_su_notes",
+        ]
+
+        if settings.telegram_bot_token:
+            from app.telegram_messenger import telegram_messenger_mcp_server
+            mcp_servers["telegram_messenger"] = telegram_messenger_mcp_server
+            allowed.append("mcp__telegram_messenger__send_telegram_message")
+
         options = ClaudeAgentOptions(
-            mcp_servers={
-                "basic_memory": get_basic_memory_mcp_config(),
-                "life_manager": life_manager_mcp_server,
-                "su_notes_manager": su_notes_mcp_server,
-            },
-            allowed_tools=[
-                "mcp__basic_memory__search_notes",
-                "mcp__basic_memory__recent_activity",
-                "mcp__life_manager__list_tasks",
-                "mcp__life_manager__list_events",
-                "mcp__life_manager__create_interjection",
-                "mcp__su_notes_manager__list_su_notes",
-            ],
+            mcp_servers=mcp_servers,
+            allowed_tools=allowed,
             disallowed_tools=[
                 "Task", "Bash", "Glob", "Grep", "Read", "Edit", "Write",
                 "WebFetch", "WebSearch", "NotebookEdit",

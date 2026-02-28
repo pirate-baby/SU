@@ -45,7 +45,7 @@ from app.daemon_registry import (
     cleanup_stale_runs, get_last_completed_run, get_runs,
 )
 from app.process_limiter import get_slot_status
-from app.repositories import TaskRepo, EventRepo, InterjectionRepo, PushSubscriptionRepo, SuNoteRepo
+from app.repositories import TaskRepo, EventRepo, InterjectionRepo, SuNoteRepo
 
 log = get_logger(__name__)
 
@@ -72,6 +72,28 @@ async def push_interjection_to_clients(interjection: dict[str, Any]) -> int:
                 "urgency": interjection.get("urgency", "normal"),
                 "source": interjection.get("source"),
                 "created_at": interjection.get("created_at"),
+            })
+            delivered += 1
+        except Exception:
+            dead.append(sid)
+    for sid in dead:
+        _active_connections.pop(sid, None)
+    return delivered
+
+
+async def push_incoming_call_to_clients(session_id: str, context: str) -> int:
+    """Push an incoming call notification to all connected WebSocket clients.
+
+    Returns the number of clients that received the message.
+    """
+    dead: list[str] = []
+    delivered = 0
+    for sid, ws_conn in _active_connections.items():
+        try:
+            await ws_conn.send_json({
+                "type": "incoming_call",
+                "session_id": session_id,
+                "context": context,
             })
             delivered += 1
         except Exception:
@@ -116,6 +138,12 @@ async def lifespan(app: FastAPI):
 
     cleanup_task = asyncio.create_task(cleanup_idle_agents())
     await scheduler.start(push_interjection_to_clients)
+
+    # Set up Telegram webhook routes
+    if settings.telegram_bot_token:
+        from app.telegram_bot import setup_webhook_routes
+        setup_webhook_routes(app)
+
     log.info("app.startup", version="3.0.0")
 
     # Trigger REM for any sessions that were still active at shutdown
@@ -257,6 +285,21 @@ async def chat_page(request: Request, session_id: str):
 
     return templates.TemplateResponse(
         "chat.html",
+        {"request": request, "session_id": session_id, "static_v": _STATIC_VERSION}
+    )
+
+
+@app.get("/call/{session_id}", response_class=HTMLResponse)
+async def call_page(request: Request, session_id: str):
+    """Serve the call landing page — auto-enters call mode.
+
+    This is the destination for Telegram "Answer Call" deep links.
+    """
+    if not await session_exists(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    return templates.TemplateResponse(
+        "call.html",
         {"request": request, "session_id": session_id, "static_v": _STATIC_VERSION}
     )
 
@@ -661,27 +704,10 @@ async def api_dismiss_interjection(interjection_id: str):
     return {"dismissed": interjection_id}
 
 
-# -- Web Push subscription API --
-
-@app.get("/api/push/vapid-key")
-async def api_vapid_public_key():
-    """Return the VAPID public key so the browser can subscribe."""
-    return {"public_key": settings.vapid_public_key or ""}
-
-
-@app.post("/api/push/subscribe")
-async def api_push_subscribe(request: Request):
-    """Store a browser push subscription."""
-    body = await request.json()
-    endpoint = body.get("endpoint", "")
-    if not endpoint:
-        raise HTTPException(400, "Missing endpoint")
-    sub_id = await PushSubscriptionRepo.upsert(
-        endpoint=endpoint,
-        subscription_json=json.dumps(body),
-    )
-    log.info("push.subscribed", sub_id=sub_id)
-    return {"id": sub_id}
+@app.get("/api/telegram/status")
+async def api_telegram_status():
+    """Return Telegram bot configuration status."""
+    return {"configured": bool(settings.telegram_bot_token)}
 
 
 # ---- WebSocket chat ----
@@ -1001,6 +1027,9 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
                 if user_message:
                     touch(session_id)
                     await handle_user_message(websocket, session_id, user_message, claude, voice_mode=True)
+            elif msg_type == "call_action":
+                action = message_data.get("action")
+                log.info("ws.call_action", session_id=session_id, action=action)
 
     except WebSocketDisconnect:
         log.info("ws.disconnected", session_id=session_id)

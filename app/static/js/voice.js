@@ -29,6 +29,7 @@ class VoiceMode {
         this.pendingAudioChunks = 0;
         this.playedAudioChunks = 0;
         this.audioEndReceived = false;
+        this._scheduledSources = []; // active AudioBufferSourceNodes for cancelPlayback
 
         // UI elements (set during init)
         this.micBtn = null;
@@ -67,9 +68,15 @@ class VoiceMode {
             // Enter voice conversation mode
             this.conversationActive = true;
             this._updateUI();
+
+            // Show call overlay if available
+            if (typeof callManager !== 'undefined') {
+                callManager.startCall();
+            }
+
             await this.startRecording();
         } else {
-            // Exit voice conversation mode
+            // Exit voice conversation mode (also closes call overlay)
             this.endConversation();
         }
     }
@@ -83,6 +90,11 @@ class VoiceMode {
         this.state = 'idle';
         this._updateUI();
         this._showPartialTranscript('');
+
+        // Close call overlay if open
+        if (typeof callManager !== 'undefined' && callManager.state !== 'idle') {
+            callManager._hide();
+        }
     }
 
     async startRecording() {
@@ -247,6 +259,11 @@ class VoiceMode {
             this._updateUI();
             this._showPartialTranscript('');
             window._voiceSendMessage(text);
+
+            // Notify call manager
+            if (typeof callManager !== 'undefined' && callManager.state === 'active') {
+                callManager._setCallState('thinking');
+            }
         } else {
             this.state = 'idle';
             this._updateUI();
@@ -265,7 +282,13 @@ class VoiceMode {
             this.pendingAudioChunks = 0;
             this.playedAudioChunks = 0;
             this.audioEndReceived = false;
+            this._scheduledSources = [];
             this._updateUI();
+
+            // Notify call manager
+            if (typeof callManager !== 'undefined' && callManager.state === 'active') {
+                callManager._setCallState('speaking');
+            }
         }
 
         this.pendingAudioChunks++;
@@ -284,6 +307,9 @@ class VoiceMode {
                 source.buffer = buffer;
                 source.connect(this.playbackContext.destination);
 
+                // Track for cancelPlayback
+                this._scheduledSources.push(source);
+
                 // Schedule seamlessly — small overlap tolerance to prevent gaps
                 const startTime = Math.max(this.playbackContext.currentTime, this.nextPlayTime);
                 source.start(startTime);
@@ -291,6 +317,8 @@ class VoiceMode {
                 this.nextPlayTime = startTime + buffer.duration - 0.005;
 
                 source.onended = () => {
+                    const idx = this._scheduledSources.indexOf(source);
+                    if (idx !== -1) this._scheduledSources.splice(idx, 1);
                     this.playedAudioChunks++;
                     this._checkPlaybackComplete();
                 };
@@ -302,6 +330,19 @@ class VoiceMode {
                 this._checkPlaybackComplete();
             }
         );
+    }
+
+    cancelPlayback() {
+        // Stop all scheduled/playing audio sources immediately
+        for (const source of this._scheduledSources) {
+            try { source.stop(); } catch {}
+        }
+        this._scheduledSources = [];
+        this.pendingAudioChunks = 0;
+        this.playedAudioChunks = 0;
+        this.audioEndReceived = true;
+        this.state = 'idle';
+        this._updateUI();
     }
 
     handleFillerEnd() {
@@ -326,6 +367,11 @@ class VoiceMode {
                     // Continuous conversation — start listening again
                     this.state = 'idle';
                     this.startRecording();
+
+                    // Notify call manager
+                    if (typeof callManager !== 'undefined' && callManager.state === 'active') {
+                        callManager._setCallState('listening');
+                    }
                 } else {
                     this.state = 'idle';
                     this._updateUI();

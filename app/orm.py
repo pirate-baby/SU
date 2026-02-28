@@ -58,17 +58,6 @@ class EventRow(Base):
         return {c.key: getattr(self, c.key) for c in self.__table__.columns}
 
 
-class PushSubscriptionRow(Base):
-    __tablename__ = "push_subscriptions"
-
-    id: Mapped[str] = mapped_column(String, primary_key=True)
-    endpoint: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
-    subscription_json: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[Optional[str]] = mapped_column(String, default=None)
-
-    def to_dict(self) -> dict:
-        return {c.key: getattr(self, c.key) for c in self.__table__.columns}
-
 
 class InterjectionRow(Base):
     __tablename__ = "interjections"
@@ -84,6 +73,19 @@ class InterjectionRow(Base):
     status: Mapped[str] = mapped_column(String, default="pending")
     created_at: Mapped[Optional[str]] = mapped_column(String, default=None)
     delivered_at: Mapped[Optional[str]] = mapped_column(String, default=None)
+
+    def to_dict(self) -> dict:
+        return {c.key: getattr(self, c.key) for c in self.__table__.columns}
+
+
+class TelegramUserRow(Base):
+    __tablename__ = "telegram_users"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    telegram_chat_id: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
+    telegram_user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    telegram_username: Mapped[Optional[str]] = mapped_column(String, default=None)
+    registered_at: Mapped[Optional[str]] = mapped_column(String, default=None)
 
     def to_dict(self) -> dict:
         return {c.key: getattr(self, c.key) for c in self.__table__.columns}

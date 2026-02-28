@@ -58,6 +58,11 @@ function connect() {
                 }
             };
         }
+
+        // Initialize call manager
+        if (typeof callManager !== 'undefined') {
+            callManager.init();
+        }
     };
 
     ws.onmessage = (event) => {
@@ -184,6 +189,21 @@ function handleMessage(data) {
         case 'connection_ready':
             setStatus('Connected', 'success');
             enableInput();
+
+            // Auto-enter call mode when opened from a call deep link
+            if (typeof AUTO_CALL_MODE !== 'undefined' && AUTO_CALL_MODE) {
+                if (typeof voiceMode !== 'undefined' && voiceMode.enabled) {
+                    setTimeout(() => {
+                        voiceMode._ensurePlaybackContext();
+                        voiceMode.conversationActive = true;
+                        voiceMode._updateUI();
+                        if (typeof callManager !== 'undefined') {
+                            callManager.startCall();
+                        }
+                        voiceMode.startRecording();
+                    }, 500);
+                }
+            }
             break;
 
         case 'restarting':
@@ -193,6 +213,18 @@ function handleMessage(data) {
 
         case 'interjection':
             appendInterjection(data);
+            break;
+
+        case 'incoming_call':
+            if (typeof callManager !== 'undefined') {
+                callManager.showIncomingCall(data);
+            }
+            break;
+
+        case 'call_ended_by_su':
+            if (typeof callManager !== 'undefined') {
+                callManager.onCallEndedBySU();
+            }
             break;
 
         case 'status':
@@ -627,7 +659,7 @@ async function endSession() {
 }
 
 sendBtn.addEventListener('click', sendMessage);
-endSessionBtn.addEventListener('click', endSession);
+if (endSessionBtn) endSessionBtn.addEventListener('click', endSession);
 
 messageInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {

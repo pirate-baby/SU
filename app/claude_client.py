@@ -25,6 +25,7 @@ from app.nicknames import resolve_name
 from app.scary_internet_agent import scary_internet_mcp_server
 from app.life_manager import life_manager_mcp_server
 from app.su_notes_manager import su_notes_mcp_server
+from app.telegram_messenger import telegram_messenger_mcp_server
 
 log = get_logger(__name__)
 
@@ -70,9 +71,19 @@ def _build_system_prompt() -> str:
         "For example, if the user mentions something they need to do but "
         "not right now, create a SU note with an appropriate activate_after "
         "so your daemon processes will remind them later.\n\n"
-
-        "## Website Browsing\n\n"
     )
+
+    if settings.telegram_bot_token:
+        prompt += (
+            "## Messaging (Telegram)\n\n"
+            f"You can text {user} directly via Telegram using the "
+            "`mcp__telegram_messenger__send_telegram_message` tool. Use this for "
+            "quick reminders, questions, or status updates when a full conversation "
+            "session isn't needed. The user may also text you via Telegram — those "
+            "messages arrive just like any other message.\n\n"
+        )
+
+    prompt += "## Website Browsing\n\n"
 
     if settings.protonmail_username and settings.protonmail_password:
         prompt += (
@@ -159,6 +170,9 @@ class ClaudeChat:
             "life_manager": life_manager_mcp_server,
             "su_notes_manager": su_notes_mcp_server,
         }
+
+        if settings.telegram_bot_token:
+            mcp_servers["telegram_messenger"] = telegram_messenger_mcp_server
 
         if settings.playwright_mcp_url:
             mcp_servers["playwright"] = {

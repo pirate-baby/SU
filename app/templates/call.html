@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SU — {{ session_id[:8] }}</title>
+    <title>SU — Call</title>
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="stylesheet" href="/static/css/call.css?v={{ static_v }}">
     <link rel="manifest" href="/static/manifest.json">
@@ -18,25 +18,13 @@
             <div class="chat-header">
                 <div class="header-left">
                     <h2><a href="/" class="header-home-link">SU</a></h2>
-                    <nav class="header-nav">
-                        <a href="/">Home</a>
-                        <a href="/sessions">Logs</a>
-                        <a href="/planner">Planner</a>
-                        <a href="/daemons">Daemons</a>
-                    </nav>
                 </div>
                 <div class="header-actions">
-                    <span class="session-id">Session: {{ session_id[:8] }}</span>
-                    <label class="amnesia-toggle" title="Skip REM memory consolidation when ending this session">
-                        <input type="checkbox" id="amnesia-checkbox">
-                        <span class="amnesia-label">amnesia</span>
-                    </label>
-                    <button id="end-session-btn" class="danger-btn">End</button>
+                    <span class="session-id">Call</span>
                 </div>
             </div>
 
             <div id="messages" class="messages-container">
-                <!-- Messages will be appended here -->
             </div>
 
             <div id="voice-status" class="voice-status" style="display: none;">
@@ -65,9 +53,8 @@
         </div>
     </div>
 
-    <!-- Call overlay -->
+    <!-- Call overlay (starts in active state for deep-link calls) -->
     <div id="call-overlay" class="call-overlay">
-        <!-- Ring screen (incoming call) -->
         <div class="call-ring-screen">
             <div class="call-avatar-wrap">
                 <div class="call-ring"></div>
@@ -87,7 +74,6 @@
             </div>
         </div>
 
-        <!-- Active call screen -->
         <div class="call-active-screen">
             <div class="call-avatar-wrap">
                 <div class="call-avatar">SU</div>
@@ -116,6 +102,7 @@
 
     <script>
         const SESSION_ID = "{{ session_id }}";
+        const AUTO_CALL_MODE = true;
     </script>
     <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
     <script src="/static/js/voice.js?v={{ static_v }}"></script>

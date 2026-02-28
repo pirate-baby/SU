@@ -1,0 +1,257 @@
+/*
+ * Call UI overlay styles.
+ *
+ * Full-screen overlay for phone-call-style voice interaction.
+ * Two states: ringing (incoming call) and active (connected call).
+ */
+
+/* ---- Overlay base ---- */
+.call-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(10, 10, 10, 0.97);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    color: #e0e0e0;
+    font-family: inherit;
+    transition: opacity 0.3s ease;
+}
+
+.call-overlay.visible {
+    display: flex;
+}
+
+/* ---- Avatar / ring ---- */
+.call-avatar-wrap {
+    position: relative;
+    margin-bottom: 2rem;
+}
+
+.call-avatar {
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #333, #555);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2.5rem;
+    font-weight: 600;
+    color: #ccc;
+    position: relative;
+    z-index: 2;
+}
+
+/* Pulsing ring for ringing state */
+.call-ring {
+    position: absolute;
+    inset: -12px;
+    border-radius: 50%;
+    border: 2px solid rgba(76, 175, 80, 0.6);
+    animation: call-pulse 1.5s ease-out infinite;
+    z-index: 1;
+}
+
+.call-ring:nth-child(2) {
+    animation-delay: 0.5s;
+}
+
+.call-ring:nth-child(3) {
+    animation-delay: 1s;
+}
+
+@keyframes call-pulse {
+    0% {
+        transform: scale(1);
+        opacity: 0.8;
+    }
+    100% {
+        transform: scale(1.8);
+        opacity: 0;
+    }
+}
+
+/* Hide rings when not ringing */
+.call-overlay:not(.ringing) .call-ring {
+    display: none;
+}
+
+/* ---- Call info ---- */
+.call-name {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+}
+
+.call-state-label {
+    font-size: 0.9rem;
+    color: #999;
+    margin-bottom: 0.5rem;
+    min-height: 1.2em;
+}
+
+.call-timer {
+    font-size: 0.85rem;
+    color: #777;
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 2rem;
+    min-height: 1.2em;
+}
+
+/* ---- State dot ---- */
+.call-state-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
+.call-state-dot.listening {
+    background: #4CAF50;
+    animation: dot-blink 1s infinite;
+}
+
+.call-state-dot.thinking {
+    background: #FF9800;
+    animation: dot-blink 0.6s infinite;
+}
+
+.call-state-dot.speaking {
+    background: #2196F3;
+    animation: dot-blink 0.8s infinite;
+}
+
+@keyframes dot-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+/* ---- Action buttons ---- */
+.call-actions {
+    display: flex;
+    gap: 1.5rem;
+    align-items: center;
+    margin-top: 1rem;
+}
+
+.call-btn {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: transform 0.15s ease, opacity 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.call-btn:active {
+    transform: scale(0.92);
+}
+
+.call-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* Accept (green) */
+.call-btn-accept {
+    background: #4CAF50;
+    color: white;
+}
+
+.call-btn-accept:hover:not(:disabled) {
+    background: #43A047;
+}
+
+/* Reject / Hang up (red) */
+.call-btn-hangup {
+    background: #f44336;
+    color: white;
+}
+
+.call-btn-hangup:hover:not(:disabled) {
+    background: #E53935;
+}
+
+/* Mute (dark) */
+.call-btn-mute {
+    background: #333;
+    color: #ccc;
+}
+
+.call-btn-mute:hover:not(:disabled) {
+    background: #444;
+}
+
+.call-btn-mute.active {
+    background: #FF9800;
+    color: white;
+}
+
+/* ---- Ring screen vs Active screen ---- */
+.call-ring-screen,
+.call-active-screen {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}
+
+.call-overlay.ringing .call-ring-screen {
+    display: flex;
+}
+
+.call-overlay.active .call-active-screen {
+    display: flex;
+}
+
+/* ---- Ringing actions ---- */
+.call-ring-actions {
+    display: flex;
+    gap: 3rem;
+    margin-top: 2rem;
+}
+
+/* ---- SVG icons in buttons ---- */
+.call-btn svg {
+    width: 24px;
+    height: 24px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+/* ---- Mobile optimizations ---- */
+@media (max-width: 480px) {
+    .call-avatar {
+        width: 80px;
+        height: 80px;
+        font-size: 2rem;
+    }
+
+    .call-ring {
+        inset: -10px;
+    }
+
+    .call-name {
+        font-size: 1.3rem;
+    }
+
+    .call-btn {
+        width: 56px;
+        height: 56px;
+    }
+}
