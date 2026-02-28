@@ -30,17 +30,9 @@ from app.session_manager import get_session
 log = get_logger(__name__)
 
 
-def _build_rem_system_prompt() -> str:
-    user = settings.user_name
+def _rem_shared_instructions(user: str) -> str:
+    """Shared instructions for both checkpoint and final REM prompts."""
     return (
-    "You are a memory consolidation system. You will receive a complete "
-    "conversation transcript. Your job is to:\n\n"
-    "A) Identify noteworthy information and store it in the KNOWLEDGE BASE "
-    "(basic-memory) for future narrative recall.\n"
-    "B) Extract any concrete TASKS or EVENTS mentioned and create them in "
-    "the task/calendar system (life_manager) so they can be tracked and "
-    "reminded about.\n\n"
-
     "== PART A: Knowledge Base (basic-memory) ==\n\n"
     "BE SELECTIVE. Not everything is worth storing. Focus on:\n"
     "- User preferences, opinions, and personal details they shared\n"
@@ -107,6 +99,39 @@ def _build_rem_system_prompt() -> str:
     "You are running headless. Do not ask for clarification."
     )
 
+
+def _build_rem_system_prompt() -> str:
+    user = settings.user_name
+    return (
+    "You are a memory consolidation system. You will receive a complete "
+    "conversation transcript. Your job is to:\n\n"
+    "A) Identify noteworthy information and store it in the KNOWLEDGE BASE "
+    "(basic-memory) for future narrative recall.\n"
+    "B) Extract any concrete TASKS or EVENTS mentioned and create them in "
+    "the task/calendar system (life_manager) so they can be tracked and "
+    "reminded about.\n\n"
+    + _rem_shared_instructions(user)
+    )
+
+
+def _build_checkpoint_system_prompt() -> str:
+    user = settings.user_name
+    return (
+    "You are a memory consolidation system performing a MID-SESSION "
+    "checkpoint. The conversation is STILL ONGOING — this is not a final "
+    "review. You are processing a segment of the conversation.\n\n"
+    "Your job is the same as a full REM pass, but with these adjustments:\n"
+    "- Focus on information that is SETTLED: facts shared, preferences "
+    "revealed, decisions made, context established.\n"
+    "- Be MORE CONSERVATIVE with task extraction — if something is still "
+    "being actively discussed, it may change. Only extract tasks/events "
+    "that are clearly committed to.\n"
+    "- Do NOT write a summary or wrap-up — the conversation continues.\n"
+    "- Another consolidation pass will happen when the session ends, "
+    "covering anything you miss now.\n\n"
+    + _rem_shared_instructions(user)
+    )
+
 ALLOWED_TOOLS = [
     # basic-memory tools
     "mcp__basic_memory__write_note",
@@ -132,29 +157,62 @@ def _build_transcript(messages: list) -> str:
     return "\n\n".join(lines)
 
 
-async def consolidate_memories(session_id: str) -> None:
-    """Review a completed session and write noteworthy memories."""
-    log.info("rem.started", session_id=session_id)
+async def consolidate_memories(
+    session_id: str,
+    after_message_id: int | None = None,
+    is_checkpoint: bool = False,
+) -> int | None:
+    """Review a session (or segment) and write noteworthy memories.
+
+    Returns the id of the last message processed, or None if nothing
+    was processed.  The caller uses this as a watermark for the next run.
+    """
+    log.info("rem.started", session_id=session_id,
+             after_message_id=after_message_id, is_checkpoint=is_checkpoint)
 
     session = await get_session(session_id)
     if not session or not session.messages:
         log.info("rem.no_messages", session_id=session_id)
-        return
+        return None
 
-    transcript = _build_transcript(session.messages)
+    # Filter to unprocessed messages when a watermark is provided
+    messages = session.messages
+    if after_message_id is not None:
+        messages = [m for m in messages if m.id is not None and m.id > after_message_id]
+
+    if not messages:
+        log.info("rem.no_new_messages", session_id=session_id,
+                 after_message_id=after_message_id)
+        return after_message_id
+
+    transcript = _build_transcript(messages)
     if not transcript.strip():
         log.info("rem.empty_transcript", session_id=session_id)
-        return
+        return after_message_id
 
-    message_count = len([m for m in session.messages if m.role in ("user", "assistant")])
-    log.info("rem.agent_starting", session_id=session_id, message_count=message_count)
+    message_count = len([m for m in messages if m.role in ("user", "assistant")])
+    log.info("rem.agent_starting", session_id=session_id,
+             message_count=message_count, is_checkpoint=is_checkpoint)
 
-    prompt = (
-        "Here is the complete conversation transcript to review:\n\n"
-        f"{transcript}\n\n"
-        "Analyze this conversation and store any noteworthy information "
-        "in the knowledge base. Follow your instructions."
-    )
+    if is_checkpoint:
+        prompt = (
+            "Here is a SEGMENT of an ongoing conversation to review "
+            "(messages since the last checkpoint):\n\n"
+            f"{transcript}\n\n"
+            "Analyze this conversation segment and store any noteworthy "
+            "information. The conversation is still ongoing. "
+            "Follow your instructions."
+        )
+        system_prompt = _build_checkpoint_system_prompt()
+    else:
+        descriptor = "remaining" if after_message_id else "complete"
+        prompt = (
+            f"Here is the {descriptor} conversation transcript to review:\n\n"
+            f"{transcript}\n\n"
+            "Analyze this conversation and store any noteworthy information "
+            "in the knowledge base. Follow your instructions."
+        )
+        system_prompt = _build_rem_system_prompt()
 
     options = ClaudeAgentOptions(
         mcp_servers={
@@ -168,7 +226,7 @@ async def consolidate_memories(session_id: str) -> None:
         ],
         permission_mode="bypassPermissions",
         max_turns=20,
-        system_prompt=_build_rem_system_prompt(),
+        system_prompt=system_prompt,
     )
 
     async with claude_process_slot(timeout=180):
@@ -198,6 +256,9 @@ async def consolidate_memories(session_id: str) -> None:
                             session_id=session_id,
                             result=message.result or "unknown",
                         )
-                        return
+                        return None
 
-    log.info("rem.completed", session_id=session_id)
+    last_id = max((m.id for m in messages if m.id is not None), default=None)
+    log.info("rem.completed", session_id=session_id,
+             is_checkpoint=is_checkpoint, last_message_id=last_id)
+    return last_id

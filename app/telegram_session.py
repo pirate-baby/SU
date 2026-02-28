@@ -17,7 +17,7 @@ from app.session_manager import (
     update_session_activity,
 )
 from app.agent_registry import release_agent
-from app.memory_manager import on_session_end
+from app.memory_manager import on_session_end, on_checkpoint
 
 log = get_logger(__name__)
 
@@ -25,14 +25,25 @@ log = get_logger(__name__)
 _chat_sessions: dict[int, str] = {}
 # In-memory timers: session_id → TimerHandle
 _timers: dict[str, asyncio.TimerHandle] = {}
+# Checkpoint timers: session_id → TimerHandle
+_checkpoint_timers: dict[str, asyncio.TimerHandle] = {}
 
 # Inactivity timeout in seconds (1 hour)
 INACTIVITY_TIMEOUT = 3600
+# Checkpoint timeout in seconds (10 minutes)
+CHECKPOINT_TIMEOUT = 600
 
 
 def _cancel_timer(session_id: str) -> None:
     """Cancel an existing inactivity timer for a session."""
     handle = _timers.pop(session_id, None)
+    if handle:
+        handle.cancel()
+
+
+def _cancel_checkpoint_timer(session_id: str) -> None:
+    """Cancel an existing checkpoint timer for a session."""
+    handle = _checkpoint_timers.pop(session_id, None)
     if handle:
         handle.cancel()
 
@@ -48,9 +59,36 @@ def _schedule_timeout(session_id: str, chat_id: int) -> None:
     _timers[session_id] = handle
 
 
+def _schedule_checkpoint(session_id: str) -> None:
+    """Schedule (or reschedule) the checkpoint timer for a session."""
+    _cancel_checkpoint_timer(session_id)
+    loop = asyncio.get_running_loop()
+    handle = loop.call_later(
+        CHECKPOINT_TIMEOUT,
+        lambda: asyncio.ensure_future(_on_checkpoint(session_id)),
+    )
+    _checkpoint_timers[session_id] = handle
+
+
+async def _on_checkpoint(session_id: str) -> None:
+    """Handle checkpoint timeout: run mid-session REM on unprocessed messages."""
+    _checkpoint_timers.pop(session_id, None)
+
+    # Only checkpoint if this session is still active
+    if session_id not in _chat_sessions.values():
+        return
+
+    log.info("telegram.checkpoint", session_id=session_id)
+    asyncio.ensure_future(on_checkpoint(session_id))
+
+    # Reschedule for the next checkpoint (resets if user sends a message)
+    _schedule_checkpoint(session_id)
+
+
 async def _on_timeout(session_id: str, chat_id: int) -> None:
     """Handle inactivity timeout: end session, run REM."""
     _timers.pop(session_id, None)
+    _cancel_checkpoint_timer(session_id)
 
     # Only expire if this session is still the active one for this chat
     if _chat_sessions.get(chat_id) != session_id:
@@ -101,14 +139,16 @@ async def get_or_create_session(chat_id: int) -> tuple[str, bool]:
     """
     existing_sid = _chat_sessions.get(chat_id)
     if existing_sid:
-        # Still active — reset timer and return
+        # Still active — reset timers and return
         _schedule_timeout(existing_sid, chat_id)
+        _schedule_checkpoint(existing_sid)
         return existing_sid, False
 
     # No active session — create a new one
     session_id = await create_session()
     _chat_sessions[chat_id] = session_id
     _schedule_timeout(session_id, chat_id)
+    _schedule_checkpoint(session_id)
 
     # Inject context from previous session if there was one
     # (find the most recently ended session — we don't track which was the
@@ -136,9 +176,10 @@ async def inject_previous_context(session_id: str, chat_id: int) -> None:
 
 
 def touch_session(session_id: str, chat_id: int) -> None:
-    """Reset the inactivity timer (call on every message)."""
+    """Reset the inactivity and checkpoint timers (call on every message)."""
     if _chat_sessions.get(chat_id) == session_id:
         _schedule_timeout(session_id, chat_id)
+        _schedule_checkpoint(session_id)
 
 
 def get_active_session(chat_id: int) -> Optional[str]:
