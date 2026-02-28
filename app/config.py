@@ -37,8 +37,7 @@ class Settings(BaseSettings):
 
     # Telegram Bot
     telegram_bot_token: Optional[str] = None
-    telegram_webhook_secret: Optional[str] = None
-    app_host: str = "localhost"
+    app_host: Optional[str] = None  # e.g. "su.tail1234.ts.net:8000" — for Telegram deep links
 
     model_config = SettingsConfigDict(
         env_file=".env",

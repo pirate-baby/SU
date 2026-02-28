@@ -139,10 +139,10 @@ async def lifespan(app: FastAPI):
     cleanup_task = asyncio.create_task(cleanup_idle_agents())
     await scheduler.start(push_interjection_to_clients)
 
-    # Set up Telegram webhook routes
+    # Start Telegram long-polling
     if settings.telegram_bot_token:
-        from app.telegram_bot import setup_webhook_routes
-        setup_webhook_routes(app)
+        from app.telegram_bot import start_polling
+        start_polling()
 
     log.info("app.startup", version="3.0.0")
 
@@ -159,6 +159,9 @@ async def lifespan(app: FastAPI):
     log.info("app.shutdown")
     await scheduler.stop()
     cleanup_task.cancel()
+    if settings.telegram_bot_token:
+        from app.telegram_bot import stop_polling
+        await stop_polling()
     await stop_log_writer()
 
 

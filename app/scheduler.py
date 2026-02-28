@@ -372,7 +372,7 @@ class Scheduler:
 
         # Send Telegram notification with "Answer Call" deep link
         tg_delivered = 0
-        if settings.telegram_bot_token and settings.app_host and settings.app_host != "localhost":
+        if settings.telegram_bot_token and settings.app_host:
             try:
                 from app.telegram_bot import send_call_notification
                 from app.telegram_users import TelegramUserRepo

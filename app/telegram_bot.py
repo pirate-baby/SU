@@ -5,15 +5,13 @@ Handles:
   - /start registration (captures chat_id)
   - Inbound text messages → Claude session → response back via Telegram
   - Outbound message delivery (interjections, direct sends)
-  - Webhook setup with FastAPI
+  - Long-polling for updates (no public URL required)
 """
 import asyncio
 import json
-import secrets
 from typing import Optional
 
 import httpx
-from fastapi import FastAPI, Request, Response
 
 from app.config import settings
 from app.logger import get_logger
@@ -34,6 +32,9 @@ _API_BASE: Optional[str] = None
 
 # Max message length for Telegram
 _MAX_MSG_LEN = 4096
+
+# Background polling task handle
+_poll_task: Optional[asyncio.Task] = None
 
 
 def _api_base() -> str:
@@ -207,46 +208,70 @@ async def process_update(update: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# FastAPI integration
+# Long-polling
 # ---------------------------------------------------------------------------
 
-def setup_webhook_routes(app: FastAPI) -> None:
-    """Register the Telegram webhook route with FastAPI."""
-    if not settings.telegram_bot_token:
-        return
+async def _poll_updates() -> None:
+    """Long-poll Telegram's getUpdates endpoint."""
+    offset = 0
+    log.info("telegram.polling_started")
 
-    webhook_secret = settings.telegram_webhook_secret or secrets.token_hex(16)
-
-    @app.post(f"/telegram/webhook/{webhook_secret}")
-    async def telegram_webhook(request: Request):
+    # Clear any stale webhook so polling works
+    async with httpx.AsyncClient(timeout=15.0) as client:
         try:
-            body = await request.json()
-            # Process in background so we return 200 quickly
-            asyncio.ensure_future(process_update(body))
+            await client.post(f"{_api_base()}/deleteWebhook")
         except Exception:
-            log.exception("telegram.webhook_error")
-        return Response(status_code=200)
+            pass
 
-    @app.on_event("startup")
-    async def _set_telegram_webhook():
-        if not settings.app_host or settings.app_host == "localhost":
-            log.warning("telegram.webhook_skip", reason="app_host not set or localhost")
-            return
-
-        webhook_url = f"https://{settings.app_host}/telegram/webhook/{webhook_secret}"
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            try:
-                resp = await client.post(
-                    f"{_api_base()}/setWebhook",
-                    json={"url": webhook_url, "allowed_updates": ["message"]},
+    while True:
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.get(
+                    f"{_api_base()}/getUpdates",
+                    params={
+                        "offset": offset,
+                        "timeout": 30,
+                        "allowed_updates": json.dumps(["message"]),
+                    },
                 )
                 data = resp.json()
-                if data.get("ok"):
-                    log.info("telegram.webhook_set", url=webhook_url)
-                else:
-                    log.error("telegram.webhook_set_failed", response=data)
-            except Exception:
-                log.exception("telegram.webhook_set_error")
+                if not data.get("ok"):
+                    log.error("telegram.poll_error", response=data)
+                    await asyncio.sleep(5)
+                    continue
+
+                for update in data.get("result", []):
+                    offset = update["update_id"] + 1
+                    asyncio.ensure_future(process_update(update))
+
+        except asyncio.CancelledError:
+            log.info("telegram.polling_stopped")
+            return
+        except Exception:
+            log.exception("telegram.poll_exception")
+            await asyncio.sleep(5)
+
+
+def start_polling() -> None:
+    """Start the background polling task."""
+    global _poll_task
+    if not settings.telegram_bot_token:
+        return
+    if _poll_task and not _poll_task.done():
+        return
+    _poll_task = asyncio.create_task(_poll_updates())
+
+
+async def stop_polling() -> None:
+    """Cancel the background polling task."""
+    global _poll_task
+    if _poll_task and not _poll_task.done():
+        _poll_task.cancel()
+        try:
+            await _poll_task
+        except asyncio.CancelledError:
+            pass
+    _poll_task = None
 
 
 # ---------------------------------------------------------------------------
