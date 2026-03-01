@@ -130,15 +130,21 @@ class Scheduler:
         func: Callable[[], Coroutine],
         interval: int,
     ) -> None:
-        """Run *func* every *interval* seconds until stopped."""
+        """Run *func* every *interval* seconds until stopped.
+
+        If *func* returns a dict it is stored as run metadata.
+        """
         # Wait until start() signals that the app is fully initialized
         await self._ready.wait()
 
         while self._running:
             run_id = await daemon_registry.start_run(name)
             try:
-                await func()
-                await daemon_registry.end_run(run_id, name, RunStatus.COMPLETED)
+                result = await func()
+                metadata = result if isinstance(result, dict) else None
+                await daemon_registry.end_run(
+                    run_id, name, RunStatus.COMPLETED, metadata=metadata,
+                )
             except asyncio.CancelledError:
                 await daemon_registry.end_run(run_id, name, RunStatus.FAILED, error="cancelled")
                 break
@@ -534,13 +540,16 @@ class Scheduler:
     # Email Scanner: triage inbox
     # ------------------------------------------------------------------
 
-    async def _email_scanner(self) -> None:
+    async def _email_scanner(self) -> dict:
         """Scan inbox via ProtonMail MCP and triage emails."""
         log.info("scheduler.email_scanner_starting")
-        await self._run_email_scanner_agent()
+        return await self._run_email_scanner_agent()
 
-    async def _run_email_scanner_agent(self) -> None:
-        """Spawn a subagent to scan and triage the email inbox."""
+    async def _run_email_scanner_agent(self) -> dict:
+        """Spawn a subagent to scan and triage the email inbox.
+
+        Returns a metadata dict with scan metrics for the daemon run record.
+        """
         from claude_agent_sdk import (
             AssistantMessage,
             ClaudeAgentOptions,
@@ -660,6 +669,8 @@ class Scheduler:
         notes_created = 0
         tool_errors = 0
         tool_calls: dict[str, int] = {}
+        # Map tool_use_id → tool_name so we can label results
+        pending_tool_ids: dict[str, str] = {}
 
         try:
             async with claude_process_slot(timeout=180, name="email_scanner"), ClaudeSDKClient(options=options) as client:
@@ -686,6 +697,7 @@ class Scheduler:
                         for block in message.content:
                             if isinstance(block, ToolUseBlock):
                                 tool_calls[block.name] = tool_calls.get(block.name, 0) + 1
+                                pending_tool_ids[block.id] = block.name
                                 log.debug(
                                     "scheduler.email_scanner_tool_use",
                                     tool=block.name,
@@ -697,12 +709,22 @@ class Scheduler:
                         if isinstance(content, list):
                             for block in content:
                                 if isinstance(block, ToolResultBlock):
+                                    tool_name = pending_tool_ids.pop(block.tool_use_id, "unknown")
                                     if block.is_error:
                                         tool_errors += 1
                                         log.warning(
                                             "scheduler.email_scanner_tool_error",
+                                            tool=tool_name,
                                             tool_use_id=block.tool_use_id,
                                             content=str(block.content)[:500],
+                                        )
+                                    elif tool_name.startswith("mcp__protonmail__"):
+                                        # Log protonmail results so we can diagnose
+                                        # silent empty returns from the MCP server.
+                                        log.info(
+                                            "scheduler.email_scanner_tool_result",
+                                            tool=tool_name,
+                                            content=str(block.content)[:1000],
                                         )
 
                     elif isinstance(message, ResultMessage):
@@ -711,7 +733,11 @@ class Scheduler:
                                 "scheduler.email_scanner_error",
                                 result=message.result or "unknown",
                             )
-                            return
+                            return {
+                                "emails_found": emails_found,
+                                "tool_errors": tool_errors,
+                                "error": message.result or "unknown",
+                            }
 
             # Derive counts from tool calls
             emails_found = tool_calls.get("mcp__protonmail__get_email_by_id", 0)
@@ -719,6 +745,16 @@ class Scheduler:
             emails_deleted = tool_calls.get("mcp__protonmail__delete_email", 0)
             tasks_created = tool_calls.get("mcp__life_manager__create_task", 0)
             notes_created = tool_calls.get("mcp__su_notes_manager__create_su_note", 0)
+
+            # Warn if get_emails was called but found nothing — likely an
+            # IMAP connection or sync issue, not a genuinely empty inbox.
+            get_emails_calls = tool_calls.get("mcp__protonmail__get_emails", 0)
+            if get_emails_calls > 0 and emails_found == 0:
+                log.warning(
+                    "scheduler.email_scanner_empty_inbox",
+                    get_emails_calls=get_emails_calls,
+                    msg="get_emails returned 0 results — possible IMAP sync issue",
+                )
 
             log.info(
                 "scheduler.email_scanner_completed",
@@ -730,6 +766,14 @@ class Scheduler:
                 tool_errors=tool_errors,
                 tool_calls=tool_calls,
             )
+            return {
+                "emails_found": emails_found,
+                "emails_moved": emails_moved,
+                "emails_deleted": emails_deleted,
+                "tasks_created": tasks_created,
+                "notes_created": notes_created,
+                "tool_errors": tool_errors,
+            }
         except Exception:
             log.exception(
                 "scheduler.email_scanner_failed",
@@ -739,6 +783,7 @@ class Scheduler:
                 tool_errors=tool_errors,
                 tool_calls=tool_calls,
             )
+            raise
 
     # ------------------------------------------------------------------
     # Daily Review: morning brief

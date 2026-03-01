@@ -83,12 +83,14 @@ async def _update_run(record: RunRecord) -> None:
         start = datetime.fromisoformat(record.started_at)
         end = datetime.fromisoformat(record.ended_at)
         duration_ms = int((end - start).total_seconds() * 1000)
+    meta_json = json.dumps(record.metadata) if record.metadata else None
     async with get_db() as db:
         await db.execute(
             """UPDATE daemon_runs
-               SET ended_at = ?, status = ?, error = ?, duration_ms = ?
+               SET ended_at = ?, status = ?, error = ?, duration_ms = ?, metadata = ?
                WHERE id = ?""",
-            (record.ended_at, record.status.value, record.error, duration_ms, record.id),
+            (record.ended_at, record.status.value, record.error, duration_ms,
+             meta_json, record.id),
         )
         await db.commit()
 
@@ -185,6 +187,7 @@ class DaemonRegistry:
         daemon_name: str,
         status: RunStatus = RunStatus.COMPLETED,
         error: Optional[str] = None,
+        metadata: Optional[dict] = None,
     ) -> None:
         """Record that a daemon run has ended."""
         now = now_iso()
@@ -197,6 +200,8 @@ class DaemonRegistry:
             record.ended_at = now
             record.status = status
             record.error = error
+            if metadata:
+                record.metadata.update(metadata)
             try:
                 await _update_run(record)
             except Exception:
