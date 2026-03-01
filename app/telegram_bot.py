@@ -4,11 +4,15 @@ Telegram bot integration for SU.
 Handles:
   - /start registration (captures chat_id)
   - Inbound text messages → Claude session → response back via Telegram
+  - Inbound photos/documents → downloaded, passed to Claude for analysis
   - Outbound message delivery (interjections, direct sends)
   - Long-polling for updates (no public URL required)
 """
 import asyncio
 import json
+import os
+import tempfile
+from pathlib import Path
 from typing import Optional
 
 import httpx
@@ -123,6 +127,107 @@ async def _handle_start(chat_id: int, user_id: int, username: Optional[str]) -> 
     )
 
 
+# ---------------------------------------------------------------------------
+# File downloads from Telegram
+# ---------------------------------------------------------------------------
+
+# Persistent temp dir for downloaded files (survives across messages in a session)
+_UPLOAD_DIR: Optional[Path] = None
+
+
+def _get_upload_dir() -> Path:
+    """Return (and lazily create) the persistent upload directory."""
+    global _UPLOAD_DIR
+    if _UPLOAD_DIR is None:
+        _UPLOAD_DIR = Path(tempfile.mkdtemp(prefix="su_telegram_uploads_"))
+    return _UPLOAD_DIR
+
+
+async def _download_telegram_file(file_id: str, filename_hint: Optional[str] = None) -> Optional[Path]:
+    """Download a file from Telegram by file_id. Returns local path or None."""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Step 1: get file path from Telegram
+            resp = await client.get(
+                f"{_api_base()}/getFile",
+                params={"file_id": file_id},
+            )
+            data = resp.json()
+            if not data.get("ok"):
+                log.error("telegram.get_file_failed", file_id=file_id, response=data)
+                return None
+
+            file_path = data["result"]["file_path"]
+            file_size = data["result"].get("file_size", 0)
+
+            # Reject files over 20MB (Telegram's limit)
+            if file_size > 20 * 1024 * 1024:
+                log.warning("telegram.file_too_large", file_id=file_id, size=file_size)
+                return None
+
+            # Step 2: determine local filename
+            if filename_hint:
+                local_name = filename_hint
+            else:
+                local_name = os.path.basename(file_path)
+            local_path = _get_upload_dir() / f"{file_id}_{local_name}"
+
+            # Step 3: download the file
+            download_url = f"https://api.telegram.org/file/bot{settings.telegram_bot_token}/{file_path}"
+            resp = await client.get(download_url)
+            resp.raise_for_status()
+
+            local_path.write_bytes(resp.content)
+            log.info("telegram.file_downloaded", file_id=file_id, path=str(local_path), size=len(resp.content))
+            return local_path
+
+    except Exception:
+        log.exception("telegram.file_download_error", file_id=file_id)
+        return None
+
+
+def _mime_for_extension(path: Path) -> str:
+    """Guess a human-readable file type from extension."""
+    ext = path.suffix.lower()
+    types = {
+        ".jpg": "photo", ".jpeg": "photo", ".png": "photo", ".gif": "image",
+        ".webp": "photo", ".heic": "photo",
+        ".pdf": "PDF document", ".doc": "Word document", ".docx": "Word document",
+        ".xls": "spreadsheet", ".xlsx": "spreadsheet", ".csv": "CSV file",
+        ".mp4": "video", ".mov": "video", ".avi": "video",
+        ".mp3": "audio", ".ogg": "voice message", ".oga": "voice message",
+        ".txt": "text file", ".json": "JSON file", ".py": "Python file",
+        ".zip": "zip archive", ".tar": "archive", ".gz": "archive",
+    }
+    return types.get(ext, "file")
+
+
+async def _handle_media_message(
+    chat_id: int,
+    file_id: str,
+    caption: Optional[str],
+    filename_hint: Optional[str] = None,
+    media_type: str = "file",
+) -> None:
+    """Download a media attachment and route it (with optional caption) to Claude."""
+    local_path = await _download_telegram_file(file_id, filename_hint)
+    if not local_path:
+        await send_message(chat_id, "Couldn't download that file. Try again?")
+        return
+
+    file_type = _mime_for_extension(local_path)
+
+    # Build the message text that Claude will see.
+    # Claude Code's Read tool can natively view images and read documents.
+    parts: list[str] = []
+    if caption:
+        parts.append(caption)
+    parts.append(f"[Attached {file_type}: {local_path}]")
+
+    text = "\n".join(parts)
+    await _handle_text_message(chat_id, text)
+
+
 async def _handle_text_message(chat_id: int, text: str) -> None:
     """Process an inbound text message: route to Claude, send response."""
     session_id, is_new = await get_or_create_session(chat_id)
@@ -186,7 +291,7 @@ async def _handle_text_message(chat_id: int, text: str) -> None:
 # ---------------------------------------------------------------------------
 
 async def process_update(update: dict) -> None:
-    """Process a raw Telegram update dict."""
+    """Process a raw Telegram update dict (text, photos, documents, voice, video)."""
     message = update.get("message")
     if not message:
         return
@@ -196,14 +301,76 @@ async def process_update(update: dict) -> None:
     user = message.get("from", {})
     user_id = user.get("id")
     username = user.get("username")
-    text = message.get("text", "").strip()
 
-    if not chat_id or not text:
+    if not chat_id:
         return
 
+    text = message.get("text", "").strip()
+    caption = (message.get("caption") or "").strip()
+
+    # /start command (always text)
     if text.startswith("/start"):
         await _handle_start(chat_id, user_id, username)
-    else:
+        return
+
+    # Photo — Telegram sends an array of sizes; pick the largest
+    photos = message.get("photo")
+    if photos:
+        best = max(photos, key=lambda p: p.get("file_size", 0))
+        await _handle_media_message(
+            chat_id, best["file_id"], caption or None,
+            filename_hint="photo.jpg", media_type="photo",
+        )
+        return
+
+    # Document (PDF, zip, etc.)
+    document = message.get("document")
+    if document:
+        await _handle_media_message(
+            chat_id, document["file_id"], caption or None,
+            filename_hint=document.get("file_name"),
+            media_type="document",
+        )
+        return
+
+    # Voice message
+    voice = message.get("voice")
+    if voice:
+        await _handle_media_message(
+            chat_id, voice["file_id"], caption or None,
+            filename_hint="voice.ogg", media_type="voice",
+        )
+        return
+
+    # Video
+    video = message.get("video")
+    if video:
+        await _handle_media_message(
+            chat_id, video["file_id"], caption or None,
+            filename_hint=video.get("file_name", "video.mp4"),
+            media_type="video",
+        )
+        return
+
+    # Video note (round video messages)
+    video_note = message.get("video_note")
+    if video_note:
+        await _handle_media_message(
+            chat_id, video_note["file_id"], caption or None,
+            filename_hint="video_note.mp4", media_type="video",
+        )
+        return
+
+    # Sticker
+    sticker = message.get("sticker")
+    if sticker:
+        emoji = sticker.get("emoji", "")
+        sticker_text = f"[Sticker: {emoji}]" if emoji else "[Sticker]"
+        await _handle_text_message(chat_id, sticker_text)
+        return
+
+    # Plain text message
+    if text:
         await _handle_text_message(chat_id, text)
 
 
