@@ -84,6 +84,13 @@ class Scheduler:
             condition="Once/day, 6-9am Eastern",
             description="Composes morning brief from tasks, events, and notes",
         ))
+        daemon_registry.register(DaemonInfo(
+            name="health_snapshot",
+            display_name="Health Snapshot",
+            category=DaemonCategory.SYSTEM,
+            interval_seconds=300,
+            description="Collects health metrics and runs retention cleanup",
+        ))
 
         self._tasks["calendar_check"] = asyncio.create_task(
             self._periodic("calendar_check", self._calendar_check, interval=1800),
@@ -109,6 +116,12 @@ class Scheduler:
         self._tasks["daily_review"] = asyncio.create_task(
             self._periodic("daily_review", self._daily_review, interval=3600),
             name="sched-daily-review",
+        )
+
+        # Health snapshot — every 5 minutes
+        self._tasks["health_snapshot"] = asyncio.create_task(
+            self._periodic("health_snapshot", self._health_snapshot, interval=300),
+            name="sched-health-snapshot",
         )
 
         # Signal periodic loops that startup is complete and they may begin
@@ -891,6 +904,35 @@ class Scheduler:
             log.info("scheduler.daily_review_completed")
         except Exception:
             log.exception("scheduler.daily_review_failed")
+
+
+    # ------------------------------------------------------------------
+    # Health Snapshot: collect metrics and run retention cleanup
+    # ------------------------------------------------------------------
+
+    # Track the last hour we ran retention cleanup (avoid running every 5 min)
+    _last_cleanup_hour: Optional[int] = None
+
+    async def _health_snapshot(self) -> None:
+        """Collect health metrics and persist a snapshot.
+
+        Also runs retention cleanup once per hour (at minute 0-4).
+        """
+        from app.health import collect_health_snapshot, save_health_snapshot, run_retention_cleanup
+
+        snapshot = await collect_health_snapshot()
+        await save_health_snapshot(snapshot)
+
+        # Run retention cleanup once per hour
+        now = datetime.utcnow()
+        current_hour = now.hour
+        if self._last_cleanup_hour != current_hour:
+            self._last_cleanup_hour = current_hour
+            try:
+                result = await run_retention_cleanup()
+                log.info("scheduler.retention_cleanup_completed", **result)
+            except Exception:
+                log.exception("scheduler.retention_cleanup_failed")
 
 
 # Module-level singleton

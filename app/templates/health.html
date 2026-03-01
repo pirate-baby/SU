@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SU — Health</title>
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#0a0a0a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg: #0a0a0a;
+            --surface: #111111;
+            --surface2: #1a1a1a;
+            --border: #2a2a2a;
+            --text: #c8c8c8;
+            --text-muted: #5a5a5a;
+            --green: #33ff33;
+            --green-dim: #1a9e1a;
+            --green-glow: rgba(51, 255, 51, 0.15);
+            --yellow: #cccc33;
+            --red: #ff3333;
+            --blue: #3399ff;
+            --mono: 'IBM Plex Mono', 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+        }
+        body {
+            font-family: var(--mono);
+            background: var(--bg);
+            color: var(--text);
+            height: 100vh;
+            overflow-y: auto;
+        }
+
+        /* Top bar */
+        .topbar {
+            height: 48px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            gap: 16px;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        .topbar h1 {
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            color: var(--green);
+            text-shadow: 0 0 10px var(--green-glow);
+        }
+        .topbar a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 13px;
+            font-family: var(--mono);
+        }
+        .topbar a:hover { color: var(--green); }
+        .topbar-right {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        /* Overall status beacon */
+        .status-beacon {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .beacon-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+        .beacon-dot.green { background: var(--green); box-shadow: 0 0 8px var(--green-glow); }
+        .beacon-dot.yellow { background: var(--yellow); box-shadow: 0 0 8px rgba(204, 204, 51, 0.3); }
+        .beacon-dot.red { background: var(--red); box-shadow: 0 0 8px rgba(255, 51, 51, 0.3); animation: pulse 1.5s ease-in-out infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+        /* Content */
+        .content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 16px;
+        }
+
+        /* Section cards */
+        .section {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            margin-bottom: 12px;
+        }
+        .section-header {
+            padding: 10px 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--surface2);
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            user-select: none;
+        }
+        .section-header:hover { background: rgba(51, 255, 51, 0.03); }
+        .section-title {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .section-status {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .section-status.green { background: var(--green-dim); }
+        .section-status.yellow { background: var(--yellow); }
+        .section-status.red { background: var(--red); }
+        .section-body {
+            padding: 12px 14px;
+        }
+        .section-body.collapsed { display: none; }
+
+        /* Grid layout for metrics */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 10px;
+        }
+        .metric-card {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            padding: 10px;
+        }
+        .metric-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+        }
+        .metric-value {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--text);
+            line-height: 1.2;
+        }
+        .metric-value.green { color: var(--green-dim); }
+        .metric-value.yellow { color: var(--yellow); }
+        .metric-value.red { color: var(--red); }
+        .metric-sub {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        /* Table rows */
+        .data-table {
+            width: 100%;
+            font-size: 12px;
+        }
+        .data-table th {
+            text-align: left;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-muted);
+            padding: 6px 8px;
+            border-bottom: 1px solid var(--border);
+            font-weight: 600;
+        }
+        .data-table td {
+            padding: 5px 8px;
+            border-bottom: 1px solid rgba(42, 42, 42, 0.5);
+            color: var(--text);
+        }
+        .data-table tr:hover td { background: rgba(51, 255, 51, 0.02); }
+        .data-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+        /* Bar chart (inline) */
+        .bar-container {
+            height: 6px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            min-width: 60px;
+        }
+        .bar-fill {
+            height: 100%;
+            transition: width 0.3s;
+        }
+        .bar-fill.green { background: var(--green-dim); }
+        .bar-fill.yellow { background: var(--yellow); }
+        .bar-fill.red { background: var(--red); }
+
+        /* Trend sparkline (canvas) */
+        .sparkline-container {
+            margin-top: 12px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            padding: 8px;
+        }
+        .sparkline-label {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+        }
+        canvas.sparkline {
+            width: 100%;
+            height: 40px;
+            display: block;
+        }
+
+        /* Buttons */
+        .btn {
+            font-family: var(--mono);
+            font-size: 11px;
+            padding: 4px 12px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            cursor: pointer;
+        }
+        .btn:hover { color: var(--green); border-color: var(--green-dim); }
+        .btn:disabled { opacity: 0.4; cursor: default; }
+
+        /* Collection time */
+        .footer-info {
+            font-size: 10px;
+            color: var(--text-muted);
+            text-align: center;
+            padding: 8px;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <h1>SU // Health</h1>
+        <a href="/">Chat</a>
+        <a href="/planner">Planner</a>
+        <a href="/sessions">Sessions</a>
+        <a href="/daemons">Daemons</a>
+        <div class="topbar-right">
+            <div class="status-beacon" id="overall-status">
+                <span class="beacon-dot" id="beacon-dot"></span>
+                <span id="beacon-label">Loading...</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="content" id="content">
+        <div style="text-align:center;padding:40px;color:var(--text-muted)">Loading health metrics...</div>
+    </div>
+
+    <script>
+    (function() {
+        const content = document.getElementById('content');
+        const beaconDot = document.getElementById('beacon-dot');
+        const beaconLabel = document.getElementById('beacon-label');
+        let healthData = null;
+        let historyData = null;
+
+        // ---- Helpers ----
+
+        function fmtBytes(b) {
+            if (b < 1024) return b + ' B';
+            if (b < 1024*1024) return (b/1024).toFixed(1) + ' KB';
+            if (b < 1024*1024*1024) return (b/(1024*1024)).toFixed(1) + ' MB';
+            return (b/(1024*1024*1024)).toFixed(2) + ' GB';
+        }
+
+        function fmtNum(n) {
+            if (n === -1 || n === null || n === undefined) return '\u2014';
+            return n.toLocaleString();
+        }
+
+        function fmtDuration(ms) {
+            if (ms == null || ms < 0) return '\u2014';
+            if (ms < 1000) return ms.toFixed(0) + 'ms';
+            if (ms < 60000) return (ms/1000).toFixed(1) + 's';
+            return Math.floor(ms/60000) + 'm' + Math.round((ms%60000)/1000) + 's';
+        }
+
+        function fmtTime(iso) {
+            if (!iso) return '\u2014';
+            const d = new Date(iso);
+            return d.toLocaleString('en-US', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', hour12:false});
+        }
+
+        function fmtAgo(iso) {
+            if (!iso) return 'never';
+            const ms = Date.now() - new Date(iso).getTime();
+            if (ms < 60000) return Math.floor(ms/1000) + 's ago';
+            if (ms < 3600000) return Math.floor(ms/60000) + 'm ago';
+            if (ms < 86400000) return Math.floor(ms/3600000) + 'h ago';
+            return Math.floor(ms/86400000) + 'd ago';
+        }
+
+        function statusColor(s) {
+            return s === 'red' ? 'var(--red)' : s === 'yellow' ? 'var(--yellow)' : 'var(--green-dim)';
+        }
+
+        function escHtml(str) {
+            const d = document.createElement('div');
+            d.textContent = str;
+            return d.innerHTML;
+        }
+
+        function rowStatusClass(rows) {
+            if (rows >= 500000) return 'red';
+            if (rows >= 100000) return 'yellow';
+            return '';
+        }
+
+        // ---- Render sections ----
+
+        function render() {
+            if (!healthData) return;
+            const d = healthData;
+
+            beaconDot.className = 'beacon-dot ' + d.status;
+            beaconLabel.textContent = d.status === 'green' ? 'Healthy' : d.status === 'yellow' ? 'Warning' : 'Critical';
+            beaconLabel.style.color = statusColor(d.status);
+
+            let html = '';
+
+            // ---- DATABASE ----
+            const db = d.database;
+            html += sectionStart('database', 'Database', db.status);
+            html += '<div class="metrics-grid">';
+            html += metricCard('File Size', fmtBytes(db.file_size_bytes), db.status, 'WAL: ' + fmtBytes(db.wal_size_bytes));
+            html += metricCard('Journal Mode', db.journal_mode.toUpperCase(), db.journal_mode === 'wal' ? 'green' : 'yellow');
+            html += metricCard('Write Latency', db.write_latency_ms >= 0 ? db.write_latency_ms + 'ms' : 'error', db.write_latency_ms > 100 ? 'red' : db.write_latency_ms > 50 ? 'yellow' : '');
+            html += metricCard('Integrity', db.integrity, db.integrity === 'ok' ? '' : 'red');
+            html += '</div>';
+
+            // Table breakdown
+            html += '<div style="margin-top:12px">';
+            html += '<table class="data-table"><thead><tr>';
+            html += '<th>Table</th><th class="num">Rows</th><th class="num">Oldest</th>';
+            html += '</tr></thead><tbody>';
+            const sortedTables = Object.entries(db.tables).sort((a,b) => b[1] - a[1]);
+            for (const [name, count] of sortedTables) {
+                const cls = rowStatusClass(count);
+                const oldest = db.oldest_rows[name] ? fmtAgo(db.oldest_rows[name]) : '\u2014';
+                html += `<tr>
+                    <td>${escHtml(name)}</td>
+                    <td class="num ${cls ? 'metric-value '+cls : ''}" style="font-size:12px">${fmtNum(count)}</td>
+                    <td class="num" style="color:var(--text-muted);font-size:11px">${oldest}</td>
+                </tr>`;
+            }
+            html += '</tbody></table></div>';
+            html += sectionEnd();
+
+            // ---- PROCESS / MEMORY ----
+            const proc = d.process;
+            html += sectionStart('process', 'Process & Memory', proc.status);
+            html += '<div class="metrics-grid">';
+            html += metricCard('RSS (Python)', proc.rss_mb + ' MB', proc.rss_mb > 500 ? 'yellow' : '');
+            const pl = proc.process_limiter;
+            html += metricCard('Process Slots', pl.used_slots + ' / ' + pl.max_slots, proc.status,
+                pl.holders.length ? pl.holders.join(', ') : 'none active');
+            html += metricCard('GC Gen0', fmtNum(proc.gc_counts.gen0), '');
+            html += '</div>';
+
+            // In-memory structures
+            html += '<div style="margin-top:12px">';
+            html += '<table class="data-table"><thead><tr>';
+            html += '<th>Structure</th><th class="num">Size</th>';
+            html += '</tr></thead><tbody>';
+            for (const [name, size] of Object.entries(proc.in_memory_structures)) {
+                const label = name.replace(/_/g, ' ');
+                html += `<tr><td>${escHtml(label)}</td><td class="num">${fmtNum(size)}</td></tr>`;
+            }
+            html += '</tbody></table></div>';
+            html += sectionEnd();
+
+            // ---- DISK ----
+            const disk = d.disk;
+            html += sectionStart('disk', 'Disk & Volumes', disk.status);
+            html += '<div class="metrics-grid">';
+            for (const [name, vol] of Object.entries(disk.volumes)) {
+                if (vol.error) {
+                    html += metricCard(name, vol.error, 'yellow', vol.path);
+                } else if (vol.used_pct !== undefined) {
+                    html += `<div class="metric-card">
+                        <div class="metric-label">${escHtml(name)}</div>
+                        <div class="metric-value" style="font-size:16px">${vol.used_mb} / ${vol.total_mb} MB</div>
+                        <div class="bar-container" style="margin-top:6px">
+                            <div class="bar-fill ${vol.status}" style="width:${vol.used_pct}%"></div>
+                        </div>
+                        <div class="metric-sub">${vol.used_pct}% used &mdash; ${vol.free_mb} MB free</div>
+                    </div>`;
+                } else if (vol.count !== undefined) {
+                    html += metricCard(name, vol.count + ' files', '', vol.total_mb + ' MB total');
+                }
+            }
+            html += '</div>';
+            html += sectionEnd();
+
+            // ---- DAEMONS ----
+            const daemons = d.daemons;
+            html += sectionStart('daemons', 'Daemon Health (24h)', daemons.status);
+            html += '<table class="data-table"><thead><tr>';
+            html += '<th></th><th>Daemon</th><th class="num">Runs</th><th class="num">Failed</th><th class="num">Fail %</th><th class="num">Avg Duration</th><th>Last Success</th><th class="num">Stuck</th>';
+            html += '</tr></thead><tbody>';
+            for (const [name, dm] of Object.entries(daemons.daemons)) {
+                const dotCls = dm.status;
+                html += `<tr>
+                    <td><span class="section-status ${dotCls}" style="display:inline-block"></span></td>
+                    <td>${escHtml(dm.display_name)}</td>
+                    <td class="num">${fmtNum(dm.runs_24h)}</td>
+                    <td class="num" style="color:${dm.failed_24h > 0 ? 'var(--red)' : 'var(--text-muted)'}">${fmtNum(dm.failed_24h)}</td>
+                    <td class="num" style="color:${dm.failure_rate_pct > 20 ? 'var(--red)' : dm.failure_rate_pct > 0 ? 'var(--yellow)' : 'var(--text-muted)'}">${dm.failure_rate_pct}%</td>
+                    <td class="num">${fmtDuration(dm.avg_duration_ms)}</td>
+                    <td style="color:var(--text-muted);font-size:11px">${fmtAgo(dm.last_success)}</td>
+                    <td class="num" style="color:${dm.stuck_runs > 0 ? 'var(--red)' : 'var(--text-muted)'}">${dm.stuck_runs}</td>
+                </tr>`;
+            }
+            html += '</tbody></table>';
+            html += sectionEnd();
+
+            // ---- LOG PIPELINE ----
+            const lp = d.log_pipeline;
+            html += sectionStart('logs', 'Log Pipeline', lp.status);
+            html += '<div class="metrics-grid">';
+            html += `<div class="metric-card">
+                <div class="metric-label">Queue</div>
+                <div class="metric-value" style="font-size:16px">${fmtNum(lp.queue_size)} / ${fmtNum(lp.queue_max)}</div>
+                <div class="bar-container" style="margin-top:6px">
+                    <div class="bar-fill ${lp.status}" style="width:${lp.queue_pct}%"></div>
+                </div>
+                <div class="metric-sub">${lp.queue_pct}% full</div>
+            </div>`;
+            html += metricCard('Logs / Hour', fmtNum(lp.logs_last_hour), '');
+            for (const [level, count] of Object.entries(lp.logs_by_level_last_hour || {})) {
+                const c = level === 'error' ? 'red' : level === 'warning' ? 'yellow' : '';
+                html += metricCard(level, fmtNum(count), c, 'last hour');
+            }
+            html += '</div>';
+            html += sectionEnd();
+
+            // ---- CONNECTIONS ----
+            const conn = d.connections;
+            html += sectionStart('connections', 'Connections', conn.status);
+            html += '<div class="metrics-grid">';
+            html += metricCard('WebSockets', fmtNum(conn.websocket_connections), '');
+            html += '</div>';
+            if (conn.connected_sessions.length > 0) {
+                html += '<div style="margin-top:8px;font-size:11px;color:var(--text-muted)">';
+                html += 'Sessions: ' + conn.connected_sessions.map(s => s.substring(0,8)).join(', ');
+                html += '</div>';
+            }
+            html += sectionEnd();
+
+            // ---- TRENDS ----
+            html += sectionStart('trends', 'Trends (24h)', 'green', true);
+            html += '<div id="trend-charts">';
+            if (historyData && historyData.length > 1) {
+                html += renderTrends();
+            } else {
+                html += '<div style="color:var(--text-muted);font-size:12px;padding:8px">Not enough snapshots yet. Trends appear after ~10 minutes.</div>';
+            }
+            html += '</div>';
+            html += sectionEnd();
+
+            // ---- ACTIONS ----
+            html += '<div style="display:flex;gap:8px;align-items:center;margin:12px 0">';
+            html += '<button class="btn" id="btn-cleanup">Run Retention Cleanup</button>';
+            html += '<button class="btn" id="btn-refresh">Refresh Now</button>';
+            html += '<span id="action-status" style="font-size:11px;color:var(--text-muted)"></span>';
+            html += '</div>';
+
+            // Footer
+            html += `<div class="footer-info">
+                Collected in ${d.collection_time_ms}ms at ${fmtTime(d.collected_at)} &mdash; auto-refreshes every 30s
+            </div>`;
+
+            content.innerHTML = html;
+
+            // Bind collapse toggles
+            content.querySelectorAll('.section-header').forEach(el => {
+                el.addEventListener('click', () => {
+                    const body = el.nextElementSibling;
+                    body.classList.toggle('collapsed');
+                });
+            });
+
+            // Bind action buttons
+            const cleanupBtn = document.getElementById('btn-cleanup');
+            const refreshBtn = document.getElementById('btn-refresh');
+            const actionStatus = document.getElementById('action-status');
+
+            if (cleanupBtn) {
+                cleanupBtn.addEventListener('click', async () => {
+                    cleanupBtn.disabled = true;
+                    actionStatus.textContent = 'Running cleanup...';
+                    try {
+                        const resp = await fetch('/api/health/cleanup', {method:'POST'});
+                        const data = await resp.json();
+                        const total = Object.values(data.deleted).reduce((a,b) => a+b, 0);
+                        actionStatus.textContent = `Cleanup done: ${total} rows deleted`;
+                        actionStatus.style.color = 'var(--green-dim)';
+                        setTimeout(fetchAll, 1000);
+                    } catch(e) {
+                        actionStatus.textContent = 'Cleanup failed: ' + e;
+                        actionStatus.style.color = 'var(--red)';
+                    }
+                    cleanupBtn.disabled = false;
+                });
+            }
+
+            if (refreshBtn) {
+                refreshBtn.addEventListener('click', () => fetchAll());
+            }
+
+            // Draw sparkline canvases after DOM update
+            requestAnimationFrame(drawSparklines);
+        }
+
+        // ---- Section helpers ----
+
+        function sectionStart(id, title, status, startCollapsed) {
+            return `<div class="section" id="section-${id}">
+                <div class="section-header">
+                    <span class="section-title">
+                        <span class="section-status ${status || 'green'}"></span>
+                        ${escHtml(title)}
+                    </span>
+                </div>
+                <div class="section-body${startCollapsed ? ' collapsed' : ''}">`;
+        }
+
+        function sectionEnd() {
+            return '</div></div>';
+        }
+
+        function metricCard(label, value, colorClass, sub) {
+            const cls = colorClass ? ' ' + colorClass : '';
+            return `<div class="metric-card">
+                <div class="metric-label">${escHtml(label)}</div>
+                <div class="metric-value${cls}">${value}</div>
+                ${sub ? '<div class="metric-sub">' + escHtml(sub) + '</div>' : ''}
+            </div>`;
+        }
+
+        // ---- Trend rendering ----
+
+        function renderTrends() {
+            if (!historyData || historyData.length < 2) return '';
+            let html = '<div class="metrics-grid" style="grid-template-columns:repeat(auto-fill, minmax(300px, 1fr))">';
+
+            const series = [
+                { label: 'DB Size (MB)', extract: d => d.database?.file_size_mb },
+                { label: 'Log Rows', extract: d => d.database?.tables?.logs },
+                { label: 'Message Rows', extract: d => d.database?.tables?.messages },
+                { label: 'Daemon Run Rows', extract: d => d.database?.tables?.daemon_runs },
+                { label: 'RSS (MB)', extract: d => d.process?.rss_mb },
+                { label: 'Process Slots Used', extract: d => d.process?.process_limiter?.used_slots },
+                { label: 'Log Queue %', extract: d => d.log_pipeline?.queue_pct },
+                { label: 'Logs / Hour', extract: d => d.log_pipeline?.logs_last_hour },
+            ];
+
+            for (const s of series) {
+                const values = historyData.map(s.extract).filter(v => v != null && v >= 0);
+                if (values.length < 2) continue;
+                html += `<div class="sparkline-container">
+                    <div class="sparkline-label">${escHtml(s.label)}: ${fmtNum(values[values.length-1])}</div>
+                    <canvas class="sparkline" data-values="${values.join(',')}" width="300" height="40"></canvas>
+                </div>`;
+            }
+
+            html += '</div>';
+            return html;
+        }
+
+        function drawSparklines() {
+            document.querySelectorAll('canvas.sparkline').forEach(canvas => {
+                const values = canvas.dataset.values.split(',').map(Number);
+                if (values.length < 2) return;
+
+                const ctx = canvas.getContext('2d');
+                const w = canvas.offsetWidth;
+                const h = canvas.offsetHeight;
+                canvas.width = w * 2;
+                canvas.height = h * 2;
+                ctx.scale(2, 2);
+
+                const min = Math.min(...values);
+                const max = Math.max(...values);
+                const range = max - min || 1;
+                const pad = 2;
+
+                ctx.strokeStyle = '#1a9e1a';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                for (let i = 0; i < values.length; i++) {
+                    const x = (i / (values.length - 1)) * (w - pad * 2) + pad;
+                    const y = h - pad - ((values[i] - min) / range) * (h - pad * 2);
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+
+                // Fill under
+                ctx.lineTo(w - pad, h - pad);
+                ctx.lineTo(pad, h - pad);
+                ctx.closePath();
+                ctx.fillStyle = 'rgba(51, 255, 51, 0.05)';
+                ctx.fill();
+            });
+        }
+
+        // ---- Data fetching ----
+
+        async function fetchAll() {
+            try {
+                const [hRes, tRes] = await Promise.all([
+                    fetch('/api/health/detailed'),
+                    fetch('/api/health/history?hours=24&limit=288'),
+                ]);
+                healthData = await hRes.json();
+                historyData = await tRes.json();
+                render();
+            } catch(e) {
+                console.error('Health fetch failed:', e);
+            }
+        }
+
+        // Boot
+        fetchAll();
+        setInterval(fetchAll, 30000);
+    })();
+    </script>
+    <script src="/static/js/notifications.js"></script>
+</body>
+</html>

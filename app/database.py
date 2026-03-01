@@ -39,6 +39,9 @@ async def init_database():
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     async with aiosqlite.connect(DATABASE_PATH) as db:
+        # Enable WAL mode for better concurrent read/write performance
+        await db.execute("PRAGMA journal_mode=WAL")
+        await db.execute("PRAGMA busy_timeout=5000")
         await db.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,
@@ -302,6 +305,20 @@ async def init_database():
         await db.execute("""
             CREATE INDEX IF NOT EXISTS idx_dl_runs_status
             ON deep_learning_runs(status)
+        """)
+
+        # -- Health snapshots (for monitoring trends) --
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS health_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                data TEXT NOT NULL
+            )
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_health_snapshots_timestamp
+            ON health_snapshots(timestamp)
         """)
 
         await db.commit()

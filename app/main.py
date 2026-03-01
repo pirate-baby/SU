@@ -1213,6 +1213,37 @@ async def health_check():
     }
 
 
+# ---- Health & Monitoring dashboard ----
+
+@app.get("/health/dashboard", response_class=HTMLResponse)
+async def health_dashboard_page(request: Request):
+    """Serve the health monitoring dashboard."""
+    return templates.TemplateResponse("health.html", {"request": request})
+
+
+@app.get("/api/health/detailed")
+async def health_detailed():
+    """Return comprehensive health metrics."""
+    from app.health import collect_health_snapshot
+    return await collect_health_snapshot()
+
+
+@app.get("/api/health/history")
+async def health_history(hours: int = 24, limit: int = 288):
+    """Return historical health snapshots for trend charts."""
+    from app.health import get_health_history
+    return await get_health_history(hours=hours, limit=limit)
+
+
+@app.post("/api/health/cleanup")
+async def health_cleanup():
+    """Manually trigger data retention cleanup."""
+    from app.health import run_retention_cleanup
+    result = await run_retention_cleanup()
+    log.info("health.manual_cleanup", **result)
+    return {"status": "completed", "deleted": result}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
