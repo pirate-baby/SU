@@ -4,6 +4,7 @@ FastAPI application with Claude chat functionality and life management.
 import asyncio
 import json
 import random as _random
+import uuid
 from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
@@ -46,6 +47,14 @@ from app.daemon_registry import (
 )
 from app.process_limiter import get_slot_status
 from app.repositories import TaskRepo, EventRepo, InterjectionRepo, SuNoteRepo
+from app.deep_learning import (
+    DocRepo as DLDocRepo,
+    RunRepo as DLRunRepo,
+    run_deep_learning,
+    cancel_run as dl_cancel_run,
+    set_broadcast_fn as dl_set_broadcast_fn,
+    ensure_staging_dir,
+)
 
 log = get_logger(__name__)
 
@@ -103,6 +112,18 @@ async def push_incoming_call_to_clients(session_id: str, context: str) -> int:
     return delivered
 
 
+async def broadcast_deep_learning_progress(event: dict[str, Any]) -> None:
+    """Push a deep learning progress event to all connected WebSocket clients."""
+    dead: list[str] = []
+    for sid, ws in _active_connections.items():
+        try:
+            await ws.send_json(event)
+        except Exception:
+            dead.append(sid)
+    for sid in dead:
+        _active_connections.pop(sid, None)
+
+
 async def deliver_pending_interjections(websocket: WebSocket) -> None:
     """Deliver any pending interjections when a client connects."""
     items = await InterjectionRepo.pending()
@@ -138,6 +159,7 @@ async def lifespan(app: FastAPI):
 
     cleanup_task = asyncio.create_task(cleanup_idle_agents())
     await scheduler.start(push_interjection_to_clients)
+    dl_set_broadcast_fn(broadcast_deep_learning_progress)
 
     # Start Telegram long-polling
     if settings.telegram_bot_token:
@@ -480,6 +502,7 @@ async def api_daemon_logs(daemon_name: str, limit: int = 200, since: str | None 
         "rem": "memory.rem",
         "agent_cleanup": "registry.cleanup",
         "log_writer": "logger.",
+        "deep_learning": "deep_learning.",
     }
     prefix = prefix_map.get(daemon_name)
     if not prefix:
@@ -706,6 +729,106 @@ async def api_dismiss_interjection(interjection_id: str):
                      snooze_until=new_activate)
 
     return {"dismissed": interjection_id}
+
+
+# ---- Deep Learning API ----
+
+@app.post("/api/deep-learning/upload")
+async def api_deep_learning_upload(request: Request):
+    """Accept file uploads for deep learning ingestion.
+
+    Expects multipart/form-data with one or more 'files' fields.
+    """
+    form = await request.form()
+    files = form.getlist("files")
+    if not files:
+        # Try singular 'file' field too
+        single = form.get("file")
+        if single:
+            files = [single]
+    if not files:
+        raise HTTPException(400, "No files provided. Use 'files' or 'file' field.")
+
+    inbox = ensure_staging_dir()
+    uploaded: list[dict] = []
+
+    for upload in files:
+        if not hasattr(upload, "filename"):
+            continue
+        filename = upload.filename or "unnamed"
+        content = await upload.read()
+        dest = inbox / f"{uuid.uuid4().hex[:8]}_{filename}"
+        dest.write_bytes(content)
+
+        doc_id = await DLDocRepo.create(
+            filename=filename,
+            file_path=str(dest),
+            file_size=len(content),
+        )
+        uploaded.append({"id": doc_id, "filename": filename, "size": len(content)})
+        log.info("deep_learning.file_uploaded", filename=filename, size=len(content))
+
+    return {"uploaded": uploaded, "count": len(uploaded)}
+
+
+class DeepLearningStartBody(BaseModel):
+    audit_only: bool = False
+
+
+@app.post("/api/deep-learning/start")
+async def api_deep_learning_start(body: DeepLearningStartBody | None = None):
+    """Start a deep learning run. Set audit_only=true to skip document ingestion."""
+    audit_only = body.audit_only if body else False
+
+    pending_docs = await DLDocRepo.list(status="pending")
+    if not audit_only and not pending_docs:
+        raise HTTPException(400, "No pending documents to ingest. Upload files first, "
+                           "or use audit_only=true to just audit existing memory.")
+
+    run_id = await DLRunRepo.create(total_documents=len(pending_docs))
+    log.info("deep_learning.run_created", run_id=run_id, audit_only=audit_only,
+             doc_count=len(pending_docs))
+
+    asyncio.create_task(
+        run_deep_learning(run_id, audit_only=audit_only),
+        name=f"deep-learning-{run_id[:8]}",
+    )
+
+    return {"run_id": run_id, "status": "started", "audit_only": audit_only,
+            "documents": len(pending_docs)}
+
+
+@app.get("/api/deep-learning/runs")
+async def api_deep_learning_runs():
+    """List all deep learning runs."""
+    return await DLRunRepo.list_all()
+
+
+@app.get("/api/deep-learning/runs/{run_id}")
+async def api_deep_learning_run(run_id: str):
+    """Get detailed status of a deep learning run."""
+    run = await DLRunRepo.get(run_id)
+    if not run:
+        raise HTTPException(404, "Run not found")
+    return run
+
+
+@app.post("/api/deep-learning/runs/{run_id}/cancel")
+async def api_deep_learning_cancel(run_id: str):
+    """Cancel a running deep learning session."""
+    run = await DLRunRepo.get(run_id)
+    if not run:
+        raise HTTPException(404, "Run not found")
+    if run["status"] != "running":
+        raise HTTPException(400, f"Run is not running (status: {run['status']})")
+    dl_cancel_run(run_id)
+    return {"status": "cancel_requested", "run_id": run_id}
+
+
+@app.get("/api/deep-learning/documents")
+async def api_deep_learning_documents(status: str | None = None):
+    """List staged deep learning documents."""
+    return await DLDocRepo.list(status=status)
 
 
 @app.get("/api/telegram/status")

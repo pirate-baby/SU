@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     telegram_bot_token: Optional[str] = None
     app_host: Optional[str] = None  # e.g. "su.tail1234.ts.net:8000" — for Telegram deep links
 
+    # Deep Learning Mode
+    deep_learning_dir: str = "/data/deep-learning"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

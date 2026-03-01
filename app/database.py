@@ -256,4 +256,52 @@ async def init_database():
             )
         """)
 
+        # -- Deep Learning documents (staged files for ingestion) --
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS deep_learning_documents (
+                id TEXT PRIMARY KEY,
+                filename TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                status TEXT DEFAULT 'pending',
+                file_size INTEGER,
+                chunk_count INTEGER DEFAULT 0,
+                chunks_processed INTEGER DEFAULT 0,
+                error TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                processed_at TIMESTAMP
+            )
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_dl_docs_status
+            ON deep_learning_documents(status)
+        """)
+
+        # -- Deep Learning runs (tracks overall run state) --
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS deep_learning_runs (
+                id TEXT PRIMARY KEY,
+                status TEXT DEFAULT 'pending',
+                phase TEXT,
+                total_documents INTEGER DEFAULT 0,
+                documents_processed INTEGER DEFAULT 0,
+                memories_written INTEGER DEFAULT 0,
+                memories_updated INTEGER DEFAULT 0,
+                memories_deleted INTEGER DEFAULT 0,
+                contradictions_found INTEGER DEFAULT 0,
+                duplicates_merged INTEGER DEFAULT 0,
+                notes_consolidated INTEGER DEFAULT 0,
+                current_step TEXT,
+                error TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                started_at TIMESTAMP,
+                completed_at TIMESTAMP
+            )
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_dl_runs_status
+            ON deep_learning_runs(status)
+        """)
+
         await db.commit()

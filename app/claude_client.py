@@ -77,6 +77,14 @@ def _build_system_prompt() -> str:
         "For example, if the user mentions something they need to do but "
         "not right now, create a SU note with an appropriate activate_after "
         "so your daemon processes will remind them later.\n\n"
+
+        "Deep Learning: You have a Deep Learning mode for ingesting documents "
+        "and refining your knowledge base. If the user wants you to deeply learn "
+        "material (personal logs, project docs, write-ups), they can upload files "
+        "via the web UI or you can save content to /data/deep-learning/inbox/ and "
+        "trigger ingestion via POST /api/deep-learning/start. You can also run "
+        "audit_only=true to just consolidate, audit, and refine your existing memory "
+        "without new documents. Status: GET /api/deep-learning/runs\n\n"
     )
 
     if settings.telegram_bot_token:
