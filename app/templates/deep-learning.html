@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SU — Deep Learning</title>
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#0a0a0a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg: #0a0a0a;
+            --surface: #111111;
+            --surface2: #1a1a1a;
+            --border: #2a2a2a;
+            --text: #c8c8c8;
+            --text-muted: #5a5a5a;
+            --green: #33ff33;
+            --green-dim: #1a9e1a;
+            --green-glow: rgba(51, 255, 51, 0.15);
+            --yellow: #cccc33;
+            --red: #ff3333;
+            --blue: #3399ff;
+            --cyan: #33cccc;
+            --mono: 'IBM Plex Mono', 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+        }
+        body {
+            font-family: var(--mono);
+            background: var(--bg);
+            color: var(--text);
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Top bar */
+        .topbar {
+            height: 48px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            gap: 16px;
+        }
+        .topbar h1 {
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            color: var(--green);
+            text-shadow: 0 0 10px var(--green-glow);
+        }
+        .topbar a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 13px;
+            font-family: var(--mono);
+        }
+        .topbar a:hover { color: var(--green); }
+
+        /* Layout */
+        .layout {
+            display: flex;
+            height: calc(100vh - 48px);
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 340px;
+            min-width: 340px;
+            border-right: 1px solid var(--border);
+            background: var(--surface);
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+
+        /* Upload zone */
+        .upload-zone {
+            padding: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .upload-zone-header {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            margin-bottom: 10px;
+        }
+        .drop-area {
+            border: 1px dashed var(--border);
+            padding: 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        .drop-area:hover, .drop-area.dragover {
+            border-color: var(--green-dim);
+            background: rgba(51, 255, 51, 0.03);
+            color: var(--text);
+        }
+        .drop-area input { display: none; }
+
+        /* Action buttons */
+        .actions {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            gap: 8px;
+        }
+        .btn {
+            font-family: var(--mono);
+            font-size: 11px;
+            font-weight: 600;
+            padding: 6px 12px;
+            border: 1px solid var(--border);
+            background: var(--surface2);
+            color: var(--text);
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            transition: border-color 0.15s, color 0.15s;
+        }
+        .btn:hover {
+            border-color: var(--green-dim);
+            color: var(--green);
+        }
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        .btn-primary {
+            border-color: var(--green-dim);
+            color: var(--green);
+        }
+        .btn-primary:hover {
+            background: rgba(51, 255, 51, 0.08);
+        }
+        .btn-danger {
+            border-color: #331111;
+            color: var(--red);
+        }
+        .btn-danger:hover {
+            background: rgba(255, 51, 51, 0.08);
+        }
+
+        /* Document list */
+        .section-header {
+            padding: 8px 16px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-muted);
+            background: var(--bg);
+            border-bottom: 1px solid var(--border);
+        }
+        .doc-item {
+            padding: 8px 16px;
+            border-bottom: 1px solid var(--border);
+            font-size: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .doc-name {
+            color: var(--text);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .doc-meta {
+            font-size: 10px;
+            color: var(--text-muted);
+            flex-shrink: 0;
+            margin-left: 8px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        /* Status badges */
+        .badge {
+            font-size: 9px;
+            padding: 1px 6px;
+            font-weight: 600;
+            font-family: var(--mono);
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+        .badge-pending { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
+        .badge-running { background: rgba(51, 255, 51, 0.1); color: var(--green); border: 1px solid #113311; }
+        .badge-completed { background: rgba(51, 255, 51, 0.08); color: var(--green-dim); border: 1px solid #113311; }
+        .badge-failed { background: rgba(255, 51, 51, 0.08); color: var(--red); border: 1px solid #331111; }
+        .badge-cancelled { background: rgba(204, 204, 51, 0.08); color: var(--yellow); border: 1px solid #333311; }
+        .badge-ingested { background: rgba(51, 153, 255, 0.08); color: var(--blue); border: 1px solid #112233; }
+        .badge-processing { background: rgba(51, 255, 51, 0.1); color: var(--green); border: 1px solid #113311; }
+
+        /* Main panels */
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
+        /* Active run status (hero section) */
+        .run-status-hero {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border);
+            background: var(--surface);
+            flex-shrink: 0;
+        }
+        .run-status-hero.active {
+            border-bottom: 1px solid #113311;
+            background: rgba(51, 255, 51, 0.02);
+        }
+        .run-phase {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+        }
+        .run-phase.active { color: var(--green-dim); }
+        .run-step {
+            font-size: 14px;
+            color: var(--text);
+            margin-bottom: 12px;
+        }
+        .run-step.active {
+            color: var(--green);
+            text-shadow: 0 0 8px var(--green-glow);
+        }
+
+        /* Progress bar */
+        .progress-bar {
+            height: 4px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            margin-bottom: 12px;
+        }
+        .progress-fill {
+            height: 100%;
+            background: var(--green-dim);
+            transition: width 0.5s;
+        }
+
+        /* Stats grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 8px;
+        }
+        .stat {
+            padding: 8px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+        }
+        .stat-value {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--green);
+        }
+        .stat-label {
+            font-size: 10px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-top: 2px;
+        }
+
+        /* Phase pipeline */
+        .phase-pipeline {
+            display: flex;
+            gap: 4px;
+            padding: 12px 24px;
+            border-bottom: 1px solid var(--border);
+            background: var(--surface);
+            flex-shrink: 0;
+        }
+        .phase-step {
+            flex: 1;
+            padding: 6px 8px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            text-align: center;
+            color: var(--text-muted);
+            background: var(--surface2);
+            border: 1px solid var(--border);
+        }
+        .phase-step.done {
+            color: var(--green-dim);
+            border-color: #113311;
+            background: rgba(51, 255, 51, 0.05);
+        }
+        .phase-step.active {
+            color: var(--green);
+            border-color: var(--green-dim);
+            background: rgba(51, 255, 51, 0.1);
+            text-shadow: 0 0 6px var(--green-glow);
+        }
+
+        /* Run history panel */
+        .panels {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+        .panel-header {
+            height: 36px;
+            padding: 0 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--surface2);
+            border-bottom: 1px solid var(--border);
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            flex-shrink: 0;
+        }
+        .panel-body {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .run-row {
+            padding: 8px 12px;
+            border-bottom: 1px solid rgba(42, 42, 42, 0.5);
+            font-size: 12px;
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+        .run-row:hover { background: rgba(51, 255, 51, 0.03); }
+        .run-row.active {
+            background: rgba(51, 255, 51, 0.05);
+            border-left: 2px solid var(--green-dim);
+        }
+        .run-row-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+        .run-row-time {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+        .run-row-stats {
+            font-size: 10px;
+            color: var(--text-muted);
+            display: flex;
+            gap: 12px;
+        }
+        .run-row-stats span { white-space: nowrap; }
+        .run-row-step {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        /* Empty / loading state */
+        .empty-state {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--text-muted);
+            font-size: 13px;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .empty-state-sub {
+            font-size: 11px;
+            color: var(--text-muted);
+            opacity: 0.6;
+        }
+
+        /* Status dot */
+        .status-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            display: inline-block;
+            flex-shrink: 0;
+        }
+        .status-dot.running {
+            background: var(--green);
+            box-shadow: 0 0 6px var(--green-glow);
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <h1>SU // Deep Learning</h1>
+        <a href="/">Home</a>
+        <a href="/planner">Planner</a>
+        <a href="/sessions">Sessions</a>
+        <a href="/daemons">Daemons</a>
+    </div>
+
+    <div class="layout">
+        <div class="sidebar" id="sidebar">
+            <!-- Upload zone -->
+            <div class="upload-zone">
+                <div class="upload-zone-header">Upload Documents</div>
+                <div class="drop-area" id="drop-area">
+                    <input type="file" id="file-input" multiple accept=".txt,.md,.markdown,.json,.csv,.log,.html,.xml,.yaml,.yml,.toml,.py,.js,.ts">
+                    Drop files here or click to browse
+                </div>
+            </div>
+
+            <!-- Action buttons -->
+            <div class="actions">
+                <button class="btn btn-primary" id="btn-start" disabled>Start</button>
+                <button class="btn" id="btn-audit">Audit Only</button>
+                <button class="btn btn-danger" id="btn-cancel" disabled>Cancel</button>
+            </div>
+
+            <!-- Staged documents -->
+            <div id="doc-list">
+                <div class="empty-state" style="padding: 24px;">
+                    <span>No documents staged</span>
+                    <span class="empty-state-sub">Upload files to begin</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="main">
+            <!-- Active run hero status -->
+            <div class="run-status-hero" id="run-hero">
+                <div class="run-phase">No Active Run</div>
+                <div class="run-step" style="color: var(--text-muted);">Upload documents and press Start, or run Audit Only to consolidate and refine existing memory.</div>
+            </div>
+
+            <!-- Phase pipeline visualization -->
+            <div class="phase-pipeline" id="phase-pipeline">
+                <div class="phase-step" data-phase="ingest">Ingest</div>
+                <div class="phase-step" data-phase="cross_reference">Cross-Ref</div>
+                <div class="phase-step" data-phase="consolidate">Consolidate</div>
+                <div class="phase-step" data-phase="audit">Audit</div>
+                <div class="phase-step" data-phase="refine">Refine</div>
+            </div>
+
+            <!-- Run history -->
+            <div class="panels">
+                <div class="panel">
+                    <div class="panel-header">Run History</div>
+                    <div class="panel-body" id="runs-panel">
+                        <div class="empty-state">No runs yet</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        const dropArea = document.getElementById('drop-area');
+        const fileInput = document.getElementById('file-input');
+        const btnStart = document.getElementById('btn-start');
+        const btnAudit = document.getElementById('btn-audit');
+        const btnCancel = document.getElementById('btn-cancel');
+        const docList = document.getElementById('doc-list');
+        const runHero = document.getElementById('run-hero');
+        const runsPanel = document.getElementById('runs-panel');
+        const phasePipeline = document.getElementById('phase-pipeline');
+
+        let documents = [];
+        let runs = [];
+        let activeRun = null;
+        let pollTimer = null;
+
+        // ---- Helpers ----
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        function fmtSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / 1048576).toFixed(1) + ' MB';
+        }
+
+        function fmtDate(iso) {
+            if (!iso) return '\u2014';
+            const d = new Date(iso);
+            const mon = d.toLocaleString('en-US', { month: 'short' });
+            return `${mon} ${d.getDate()} ${d.toLocaleTimeString('en-US', {
+                hour12: false, hour: '2-digit', minute: '2-digit'
+            })}`;
+        }
+
+        function statusBadge(status) {
+            const cls = `badge-${status}`;
+            return `<span class="badge ${cls}">${status}</span>`;
+        }
+
+        const PHASE_ORDER = ['ingest', 'cross_reference', 'consolidate', 'audit', 'refine'];
+
+        // ---- File upload ----
+
+        dropArea.addEventListener('click', () => fileInput.click());
+        dropArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropArea.classList.add('dragover');
+        });
+        dropArea.addEventListener('dragleave', () => dropArea.classList.remove('dragover'));
+        dropArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropArea.classList.remove('dragover');
+            uploadFiles(e.dataTransfer.files);
+        });
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files.length) uploadFiles(fileInput.files);
+        });
+
+        async function uploadFiles(files) {
+            const formData = new FormData();
+            for (const f of files) {
+                formData.append('files', f);
+            }
+
+            dropArea.textContent = 'Uploading...';
+            try {
+                const resp = await fetch('/api/deep-learning/upload', {
+                    method: 'POST',
+                    body: formData,
+                });
+                const data = await resp.json();
+                dropArea.textContent = `${data.count} file(s) uploaded`;
+                setTimeout(() => {
+                    dropArea.innerHTML = '<input type="file" id="file-input" multiple accept=".txt,.md,.markdown,.json,.csv,.log,.html,.xml,.yaml,.yml,.toml,.py,.js,.ts">Drop files here or click to browse';
+                    // Re-bind the new file input
+                    const newInput = dropArea.querySelector('input');
+                    newInput.addEventListener('change', () => {
+                        if (newInput.files.length) uploadFiles(newInput.files);
+                    });
+                }, 2000);
+                await refreshDocuments();
+            } catch (err) {
+                dropArea.textContent = 'Upload failed: ' + err.message;
+                console.error('Upload failed:', err);
+            }
+        }
+
+        // ---- Actions ----
+
+        btnStart.addEventListener('click', async () => {
+            btnStart.disabled = true;
+            try {
+                const resp = await fetch('/api/deep-learning/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ audit_only: false }),
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    alert(data.detail || 'Failed to start');
+                    return;
+                }
+                await refreshAll();
+            } catch (err) {
+                alert('Failed to start: ' + err.message);
+            } finally {
+                btnStart.disabled = false;
+            }
+        });
+
+        btnAudit.addEventListener('click', async () => {
+            btnAudit.disabled = true;
+            try {
+                const resp = await fetch('/api/deep-learning/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ audit_only: true }),
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    alert(data.detail || 'Failed to start');
+                    return;
+                }
+                await refreshAll();
+            } catch (err) {
+                alert('Failed to start: ' + err.message);
+            } finally {
+                btnAudit.disabled = false;
+            }
+        });
+
+        btnCancel.addEventListener('click', async () => {
+            if (!activeRun) return;
+            btnCancel.disabled = true;
+            try {
+                await fetch(`/api/deep-learning/runs/${activeRun.id}/cancel`, { method: 'POST' });
+                await refreshAll();
+            } catch (err) {
+                alert('Failed to cancel: ' + err.message);
+            }
+        });
+
+        // ---- Rendering ----
+
+        function renderDocuments() {
+            if (!documents.length) {
+                docList.innerHTML = '<div class="empty-state" style="padding: 24px;"><span>No documents staged</span><span class="empty-state-sub">Upload files to begin</span></div>';
+                btnStart.disabled = true;
+                return;
+            }
+
+            const pending = documents.filter(d => d.status === 'pending');
+            const processed = documents.filter(d => d.status !== 'pending');
+
+            btnStart.disabled = pending.length === 0 || !!activeRun;
+
+            let html = '';
+            if (pending.length) {
+                html += '<div class="section-header">Pending</div>';
+                html += pending.map(d =>
+                    `<div class="doc-item">
+                        <span class="doc-name">${escapeHtml(d.filename)}</span>
+                        <span class="doc-meta">
+                            ${fmtSize(d.file_size || 0)}
+                            ${statusBadge(d.status)}
+                        </span>
+                    </div>`
+                ).join('');
+            }
+            if (processed.length) {
+                html += '<div class="section-header">Processed</div>';
+                html += processed.map(d => {
+                    let progress = '';
+                    if (d.status === 'processing' && d.chunk_count > 0) {
+                        progress = ` ${d.chunks_processed}/${d.chunk_count}`;
+                    }
+                    return `<div class="doc-item">
+                        <span class="doc-name">${escapeHtml(d.filename)}</span>
+                        <span class="doc-meta">
+                            ${progress}
+                            ${statusBadge(d.status)}
+                        </span>
+                    </div>`;
+                }).join('');
+            }
+            docList.innerHTML = html;
+        }
+
+        function renderActiveRun() {
+            if (!activeRun || activeRun.status === 'completed' || activeRun.status === 'failed' || activeRun.status === 'cancelled') {
+                // No active run
+                runHero.classList.remove('active');
+                if (activeRun && activeRun.status !== 'pending') {
+                    const s = activeRun;
+                    runHero.innerHTML = `
+                        <div class="run-phase">${escapeHtml(s.status)}</div>
+                        <div class="run-step" style="color: ${s.status === 'completed' ? 'var(--green-dim)' : 'var(--red)'};">${escapeHtml(s.current_step || s.status)}</div>
+                        <div class="stats-grid">
+                            <div class="stat"><div class="stat-value">${s.documents_processed || 0}</div><div class="stat-label">Docs Ingested</div></div>
+                            <div class="stat"><div class="stat-value">${s.memories_written || 0}</div><div class="stat-label">Written</div></div>
+                            <div class="stat"><div class="stat-value">${s.memories_updated || 0}</div><div class="stat-label">Updated</div></div>
+                            <div class="stat"><div class="stat-value">${s.notes_consolidated || 0}</div><div class="stat-label">Consolidated</div></div>
+                            <div class="stat"><div class="stat-value">${s.duplicates_merged || 0}</div><div class="stat-label">Refined</div></div>
+                        </div>`;
+                } else {
+                    runHero.innerHTML = `
+                        <div class="run-phase">No Active Run</div>
+                        <div class="run-step" style="color: var(--text-muted);">Upload documents and press Start, or run Audit Only to consolidate and refine existing memory.</div>`;
+                }
+                btnCancel.disabled = true;
+                renderPipeline(null);
+                return;
+            }
+
+            // Active run
+            runHero.classList.add('active');
+            btnCancel.disabled = false;
+            btnStart.disabled = true;
+
+            const s = activeRun;
+            const docsTotal = s.total_documents || 0;
+            const docsProcessed = s.documents_processed || 0;
+            const pct = docsTotal > 0 ? Math.round(docsProcessed / docsTotal * 100) : 0;
+
+            runHero.innerHTML = `
+                <div class="run-phase active">
+                    <span class="status-dot running"></span>
+                    ${escapeHtml(s.phase || 'starting').replace('_', ' ')}
+                </div>
+                <div class="run-step active">${escapeHtml(s.current_step || 'Starting...')}</div>
+                ${s.phase === 'ingest' && docsTotal > 0 ? `
+                    <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+                ` : ''}
+                <div class="stats-grid">
+                    <div class="stat"><div class="stat-value">${docsProcessed}${docsTotal ? '/' + docsTotal : ''}</div><div class="stat-label">Docs Ingested</div></div>
+                    <div class="stat"><div class="stat-value">${s.memories_written || 0}</div><div class="stat-label">Written</div></div>
+                    <div class="stat"><div class="stat-value">${s.memories_updated || 0}</div><div class="stat-label">Updated</div></div>
+                    <div class="stat"><div class="stat-value">${s.notes_consolidated || 0}</div><div class="stat-label">Consolidated</div></div>
+                    <div class="stat"><div class="stat-value">${s.duplicates_merged || 0}</div><div class="stat-label">Refined</div></div>
+                </div>`;
+
+            renderPipeline(s.phase);
+        }
+
+        function renderPipeline(currentPhase) {
+            const steps = phasePipeline.querySelectorAll('.phase-step');
+            const currentIdx = currentPhase ? PHASE_ORDER.indexOf(currentPhase) : -1;
+
+            steps.forEach((step, i) => {
+                step.classList.remove('active', 'done');
+                if (i < currentIdx) step.classList.add('done');
+                else if (i === currentIdx) step.classList.add('active');
+            });
+        }
+
+        function renderRuns() {
+            if (!runs.length) {
+                runsPanel.innerHTML = '<div class="empty-state">No runs yet</div>';
+                return;
+            }
+
+            runsPanel.innerHTML = runs.map(r => {
+                const isActive = activeRun && r.id === activeRun.id;
+                return `<div class="run-row${isActive ? ' active' : ''}">
+                    <div class="run-row-header">
+                        <span class="run-row-time">${fmtDate(r.created_at)}</span>
+                        ${statusBadge(r.status)}
+                    </div>
+                    <div class="run-row-stats">
+                        <span>${r.total_documents || 0} docs</span>
+                        <span>${r.memories_written || 0} written</span>
+                        <span>${r.memories_updated || 0} updated</span>
+                        <span>${r.notes_consolidated || 0} consolidated</span>
+                    </div>
+                    ${r.current_step ? `<div class="run-row-step">${escapeHtml(r.current_step)}</div>` : ''}
+                </div>`;
+            }).join('');
+        }
+
+        // ---- Data fetching ----
+
+        async function refreshDocuments() {
+            try {
+                const resp = await fetch('/api/deep-learning/documents');
+                documents = await resp.json();
+                renderDocuments();
+            } catch (err) {
+                console.error('Failed to fetch documents:', err);
+            }
+        }
+
+        async function refreshRuns() {
+            try {
+                const resp = await fetch('/api/deep-learning/runs');
+                runs = await resp.json();
+
+                // Find any running run
+                activeRun = runs.find(r => r.status === 'running' || r.status === 'pending') || null;
+                // If no active run, show the most recent completed/failed one
+                if (!activeRun && runs.length) {
+                    activeRun = runs[0];
+                }
+
+                renderActiveRun();
+                renderRuns();
+            } catch (err) {
+                console.error('Failed to fetch runs:', err);
+            }
+        }
+
+        async function refreshAll() {
+            await Promise.all([refreshDocuments(), refreshRuns()]);
+        }
+
+        // ---- WebSocket for real-time progress ----
+
+        function connectWebSocket() {
+            // Reuse existing chat websocket pattern? No — DL page doesn't have a session.
+            // We'll just poll more frequently when a run is active.
+        }
+
+        // ---- Polling ----
+
+        function startPolling() {
+            refreshAll();
+            pollTimer = setInterval(() => {
+                const isActive = activeRun && (activeRun.status === 'running' || activeRun.status === 'pending');
+                refreshAll();
+                // If active, poll faster
+                if (isActive && pollTimer._interval !== 3000) {
+                    clearInterval(pollTimer);
+                    pollTimer = setInterval(() => refreshAll(), 3000);
+                    pollTimer._interval = 3000;
+                } else if (!isActive && pollTimer._interval !== 10000) {
+                    clearInterval(pollTimer);
+                    pollTimer = setInterval(() => refreshAll(), 10000);
+                    pollTimer._interval = 10000;
+                }
+            }, 5000);
+            pollTimer._interval = 5000;
+        }
+
+        // ---- Boot ----
+        startPolling();
+    })();
+    </script>
+</body>
+</html>

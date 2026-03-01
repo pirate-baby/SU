@@ -443,6 +443,12 @@ async def daemons_page(request: Request):
     return templates.TemplateResponse("daemons.html", {"request": request})
 
 
+@app.get("/deep-learning", response_class=HTMLResponse)
+async def deep_learning_page(request: Request):
+    """Serve the Deep Learning mode page."""
+    return templates.TemplateResponse("deep-learning.html", {"request": request})
+
+
 @app.get("/api/daemons")
 async def api_daemon_index():
     """Return the daemon process index with current state."""
