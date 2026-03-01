@@ -535,9 +535,14 @@ class Scheduler:
     async def _run_email_scanner_agent(self) -> None:
         """Spawn a subagent to scan and triage the email inbox."""
         from claude_agent_sdk import (
+            AssistantMessage,
             ClaudeAgentOptions,
             ClaudeSDKClient,
             ResultMessage,
+            SystemMessage,
+            ToolResultBlock,
+            ToolUseBlock,
+            UserMessage,
         )
         from app.memory_manager import get_basic_memory_mcp_config
         from app.life_manager import life_manager_mcp_server
@@ -548,12 +553,21 @@ class Scheduler:
         nickname = resolve_name("email_scanner")
         prompt = (
             f"Current time: {now.isoformat()}\n\n"
-            f"Scan {settings.user_name}'s inbox for new/unread emails. For each email:\n\n"
+            f"Scan {settings.user_name}'s inbox for ALL emails across all addresses and "
+            "aliases (multiple addresses may be proxied into this account). "
+            "Fetch all emails, not just unread. For each email:\n\n"
             "1. If it's actionable (deadline, request, appointment), create a task for the user "
             "and/or a SU note to follow up.\n"
             "2. If it needs a timely response, create a SU note with an appropriate activate_after.\n"
             "3. If it's informational but important, save relevant context to a SU note of type 'observation'.\n"
-            "4. If it's spam/newsletter/low-priority, you can skip it.\n\n"
+            "4. If it's spam/newsletter/low-priority, no task or note needed.\n\n"
+            "After processing each email, you MUST clear it from the inbox:\n"
+            "- Actionable/important emails: move to an appropriate folder (e.g. 'Receipts', "
+            "'Work', 'Personal') using move_email. Create the folder with create_folder first "
+            "if it doesn't exist.\n"
+            "- Spam/newsletters/junk: delete with delete_email.\n"
+            "- Everything else: archive by moving to 'Archive' folder.\n\n"
+            "The inbox should be EMPTY when you are done.\n\n"
             "Check the knowledge base for context about people/projects mentioned. "
             "Don't create duplicate tasks for things already tracked. "
             "Store the email subject and sender in context_json on any SU notes you create."
@@ -564,10 +578,13 @@ class Scheduler:
             f"{settings.user_name}'s inbox and take proactive action. You can create tasks, "
             "calendar events, and SU notes. You have access to the email system, knowledge "
             "base, and task/event lists.\n\n"
-            "Be selective — don't create noise. Only act on emails that genuinely need "
-            "attention. For urgent items with deadlines, create both a user task AND a SU "
-            f"note to follow up if the user doesn't act. Address the user as \"{nickname}\" "
-            "in any interjections. Headless — no clarifying questions."
+            "Be selective about creating tasks — don't create noise. Only create tasks/notes "
+            "for emails that genuinely need attention. For urgent items with deadlines, create "
+            "both a user task AND a SU note to follow up if the user doesn't act.\n\n"
+            "However, you MUST process every email in the inbox — move it to the right "
+            "folder, archive it, or delete it. Nothing should remain in the inbox when you "
+            f"are done. Address the user as \"{nickname}\" in any interjections. "
+            "Headless — no clarifying questions."
         )
 
         protonmail_mcp = {
@@ -591,11 +608,14 @@ class Scheduler:
             "protonmail": protonmail_mcp,
         }
         allowed = [
-            "mcp__protonmail__list_emails",
-            "mcp__protonmail__read_email",
+            "mcp__protonmail__get_emails",
+            "mcp__protonmail__get_email_by_id",
             "mcp__protonmail__search_emails",
             "mcp__protonmail__move_email",
-            "mcp__protonmail__list_folders",
+            "mcp__protonmail__delete_email",
+            "mcp__protonmail__mark_email_read",
+            "mcp__protonmail__get_folders",
+            "mcp__protonmail__create_folder",
             "mcp__basic_memory__search_notes",
             "mcp__basic_memory__read_note",
             "mcp__life_manager__create_task",
@@ -625,20 +645,93 @@ class Scheduler:
             system_prompt=system_prompt,
         )
 
+        # Counters for observability
+        emails_found = 0
+        emails_moved = 0
+        emails_deleted = 0
+        tasks_created = 0
+        notes_created = 0
+        tool_errors = 0
+        tool_calls: dict[str, int] = {}
+
         try:
             async with claude_process_slot(timeout=180, name="email_scanner"), ClaudeSDKClient(options=options) as client:
                 await client.query(prompt)
                 async for message in client.receive_response():
-                    if isinstance(message, ResultMessage) and message.is_error:
-                        log.warning(
-                            "scheduler.email_scanner_error",
-                            result=message.result or "unknown",
-                        )
-                        return
+                    if isinstance(message, SystemMessage):
+                        if message.subtype == "init":
+                            for srv in message.data.get("mcp_servers", []):
+                                name = srv.get("name", "unknown")
+                                status = srv.get("status", "unknown")
+                                if status != "connected":
+                                    log.error(
+                                        "scheduler.email_scanner_mcp_failed",
+                                        server_name=name,
+                                        server_status=status,
+                                    )
+                                else:
+                                    log.debug(
+                                        "scheduler.email_scanner_mcp_connected",
+                                        server_name=name,
+                                    )
 
-            log.info("scheduler.email_scanner_completed")
+                    elif isinstance(message, AssistantMessage):
+                        for block in message.content:
+                            if isinstance(block, ToolUseBlock):
+                                tool_calls[block.name] = tool_calls.get(block.name, 0) + 1
+                                log.debug(
+                                    "scheduler.email_scanner_tool_use",
+                                    tool=block.name,
+                                    input=str(block.input)[:300],
+                                )
+
+                    elif isinstance(message, UserMessage):
+                        content = message.content
+                        if isinstance(content, list):
+                            for block in content:
+                                if isinstance(block, ToolResultBlock):
+                                    if block.is_error:
+                                        tool_errors += 1
+                                        log.warning(
+                                            "scheduler.email_scanner_tool_error",
+                                            tool_use_id=block.tool_use_id,
+                                            content=str(block.content)[:500],
+                                        )
+
+                    elif isinstance(message, ResultMessage):
+                        if message.is_error:
+                            log.warning(
+                                "scheduler.email_scanner_error",
+                                result=message.result or "unknown",
+                            )
+                            return
+
+            # Derive counts from tool calls
+            emails_found = tool_calls.get("mcp__protonmail__get_email_by_id", 0)
+            emails_moved = tool_calls.get("mcp__protonmail__move_email", 0)
+            emails_deleted = tool_calls.get("mcp__protonmail__delete_email", 0)
+            tasks_created = tool_calls.get("mcp__life_manager__create_task", 0)
+            notes_created = tool_calls.get("mcp__su_notes_manager__create_su_note", 0)
+
+            log.info(
+                "scheduler.email_scanner_completed",
+                emails_found=emails_found,
+                emails_moved=emails_moved,
+                emails_deleted=emails_deleted,
+                tasks_created=tasks_created,
+                notes_created=notes_created,
+                tool_errors=tool_errors,
+                tool_calls=tool_calls,
+            )
         except Exception:
-            log.exception("scheduler.email_scanner_failed")
+            log.exception(
+                "scheduler.email_scanner_failed",
+                emails_found=emails_found,
+                emails_moved=emails_moved,
+                emails_deleted=emails_deleted,
+                tool_errors=tool_errors,
+                tool_calls=tool_calls,
+            )
 
     # ------------------------------------------------------------------
     # Daily Review: morning brief
