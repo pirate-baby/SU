@@ -435,7 +435,7 @@
             <div class="upload-zone">
                 <div class="upload-zone-header">Upload Documents</div>
                 <div class="drop-area" id="drop-area">
-                    <input type="file" id="file-input" multiple accept=".txt,.md,.markdown,.json,.csv,.log,.html,.xml,.yaml,.yml,.toml,.py,.js,.ts">
+                    <input type="file" id="file-input" multiple accept=".txt,.md,.markdown,.json,.csv,.log,.html,.xml,.yaml,.yml,.toml,.py,.js,.ts,.pdf,.doc,.docx,.rtf">
                     Drop files here or click to browse
                 </div>
             </div>
@@ -564,7 +564,7 @@
                 const data = await resp.json();
                 dropArea.textContent = `${data.count} file(s) uploaded`;
                 setTimeout(() => {
-                    dropArea.innerHTML = '<input type="file" id="file-input" multiple accept=".txt,.md,.markdown,.json,.csv,.log,.html,.xml,.yaml,.yml,.toml,.py,.js,.ts">Drop files here or click to browse';
+                    dropArea.innerHTML = '<input type="file" id="file-input" multiple accept=".txt,.md,.markdown,.json,.csv,.log,.html,.xml,.yaml,.yml,.toml,.py,.js,.ts,.pdf,.doc,.docx,.rtf">Drop files here or click to browse';
                     // Re-bind the new file input
                     const newInput = dropArea.querySelector('input');
                     newInput.addEventListener('change', () => {
