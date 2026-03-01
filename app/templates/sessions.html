@@ -275,6 +275,13 @@
             color: var(--text);
             margin-top: 4px;
         }
+        .msg-row { cursor: pointer; }
+        .msg-truncated::after {
+            content: ' [click to expand]';
+            color: var(--text-muted);
+            font-size: 11px;
+            font-style: italic;
+        }
 
         /* Logs panel */
         .log-row {
@@ -286,10 +293,12 @@
             display: flex;
             gap: 8px;
             align-items: baseline;
-            cursor: default;
+            cursor: pointer;
+            flex-wrap: wrap;
         }
         .log-row:hover { background: rgba(51, 255, 51, 0.03); }
         .log-row.highlighted { background: rgba(51, 255, 51, 0.08); }
+        .log-row.expanded { background: rgba(51, 255, 51, 0.04); }
         .log-time {
             color: var(--text-muted);
             font-size: 11px;
@@ -323,6 +332,19 @@
             text-overflow: ellipsis;
             white-space: nowrap;
         }
+        .log-expanded-data {
+            width: 100%;
+            padding: 6px 0 4px 0;
+            margin-left: 0;
+            color: var(--text-muted);
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-size: 11px;
+            line-height: 1.5;
+            display: none;
+        }
+        .log-row.expanded .log-data { display: none; }
+        .log-row.expanded .log-expanded-data { display: block; }
 
         /* Empty state */
         .empty-state {
@@ -501,21 +523,30 @@
                 return;
             }
             messagesPanel.innerHTML = allMessages.map((m, i) => {
+                const isTruncated = m.content.length > 2000;
+                const content = isTruncated ? m.content.slice(0, 2000) + '...' : m.content;
                 const roleClass = `msg-role-${m.role}`;
-                const content = m.content.length > 2000 ? m.content.slice(0, 2000) + '...' : m.content;
+                const truncClass = isTruncated ? ' msg-truncated' : '';
                 return `<div class="msg-row" data-ts="${m.created_at || ''}" data-idx="${i}">
                     <span class="msg-time">${fmtTime(m.created_at)}</span>
                     <span class="msg-role ${roleClass}">${m.role}</span>
-                    <div class="msg-content">${escapeHtml(content)}</div>
+                    <div class="msg-content${truncClass}">${escapeHtml(content)}</div>
                 </div>`;
             }).join('');
 
-            // Click to sync
+            // Click to expand truncated messages + sync
             messagesPanel.querySelectorAll('.msg-row').forEach(el => {
                 el.addEventListener('click', () => {
-                    if (!syncEnabled) return;
-                    const ts = el.dataset.ts;
-                    if (ts) syncLogsToTime(ts, el);
+                    const idx = parseInt(el.dataset.idx);
+                    const contentEl = el.querySelector('.msg-content');
+                    if (contentEl.classList.contains('msg-truncated')) {
+                        contentEl.textContent = allMessages[idx].content;
+                        contentEl.classList.remove('msg-truncated');
+                    }
+                    if (syncEnabled) {
+                        const ts = el.dataset.ts;
+                        if (ts) syncLogsToTime(ts, el);
+                    }
                 });
             });
         }
@@ -543,28 +574,41 @@
             logsPanel.innerHTML = filtered.map((l, i) => {
                 const data = l.data && l.data !== '{}' ? l.data : '';
                 let dataStr = '';
+                let expandedStr = '';
                 if (data) {
                     try {
                         const parsed = JSON.parse(data);
                         dataStr = Object.entries(parsed)
                             .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
                             .join(' ');
-                    } catch { dataStr = data; }
+                        expandedStr = Object.entries(parsed)
+                            .map(([k, v]) => {
+                                let val = typeof v === 'string' ? v : JSON.stringify(v, null, 2);
+                                return `${k}: ${val}`;
+                            })
+                            .join('\n');
+                    } catch { dataStr = data; expandedStr = data; }
                 }
                 return `<div class="log-row" data-ts="${l.timestamp}" data-idx="${i}">
                     <span class="log-time">${fmtTime(l.timestamp)}</span>
                     <span class="log-level log-level-${l.level}">${l.level}</span>
                     <span class="log-event">${escapeHtml(l.event)}</span>
                     <span class="log-data">${escapeHtml(dataStr)}</span>
+                    ${expandedStr ? `<div class="log-expanded-data">${escapeHtml(expandedStr)}</div>` : ''}
                 </div>`;
             }).join('');
 
-            // Click to sync messages
+            // Click to expand or sync
             logsPanel.querySelectorAll('.log-row').forEach(el => {
                 el.addEventListener('click', () => {
-                    if (!syncEnabled) return;
-                    const ts = el.dataset.ts;
-                    if (ts) syncMessagesToTime(ts, el);
+                    const hasExpanded = el.querySelector('.log-expanded-data');
+                    if (hasExpanded) {
+                        el.classList.toggle('expanded');
+                    }
+                    if (syncEnabled) {
+                        const ts = el.dataset.ts;
+                        if (ts) syncMessagesToTime(ts, el);
+                    }
                 });
             });
         }

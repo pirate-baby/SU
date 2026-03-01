@@ -298,8 +298,11 @@
             display: flex;
             gap: 8px;
             align-items: baseline;
+            cursor: pointer;
+            flex-wrap: wrap;
         }
         .log-row:hover { background: rgba(51, 255, 51, 0.03); }
+        .log-row.expanded { background: rgba(51, 255, 51, 0.04); }
         .log-time {
             color: var(--text-muted);
             font-size: 11px;
@@ -332,6 +335,19 @@
             text-overflow: ellipsis;
             white-space: nowrap;
         }
+        .log-expanded-data {
+            width: 100%;
+            padding: 6px 0 4px 0;
+            margin-left: 0;
+            color: var(--text-muted);
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-size: 11px;
+            line-height: 1.5;
+            display: none;
+        }
+        .log-row.expanded .log-data { display: none; }
+        .log-row.expanded .log-expanded-data { display: block; }
 
         /* Empty / loading state */
         .empty-state {
@@ -613,21 +629,39 @@
             logsPanel.innerHTML = logs.map(l => {
                 const data = l.data && l.data !== '{}' ? l.data : '';
                 let dataStr = '';
+                let expandedStr = '';
                 if (data) {
                     try {
                         const parsed = JSON.parse(data);
                         dataStr = Object.entries(parsed)
                             .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
                             .join(' ');
-                    } catch { dataStr = data; }
+                        expandedStr = Object.entries(parsed)
+                            .map(([k, v]) => {
+                                let val = typeof v === 'string' ? v : JSON.stringify(v, null, 2);
+                                return `${k}: ${val}`;
+                            })
+                            .join('\n');
+                    } catch { dataStr = data; expandedStr = data; }
                 }
                 return `<div class="log-row">
                     <span class="log-time">${fmtTime(l.timestamp)}</span>
                     <span class="log-level log-level-${l.level}">${l.level}</span>
                     <span class="log-event">${escapeHtml(l.event)}</span>
                     <span class="log-data">${escapeHtml(dataStr)}</span>
+                    ${expandedStr ? `<div class="log-expanded-data">${escapeHtml(expandedStr)}</div>` : ''}
                 </div>`;
             }).join('');
+
+            // Click to expand
+            logsPanel.querySelectorAll('.log-row').forEach(el => {
+                el.addEventListener('click', () => {
+                    const hasExpanded = el.querySelector('.log-expanded-data');
+                    if (hasExpanded) {
+                        el.classList.toggle('expanded');
+                    }
+                });
+            });
         }
 
         // ---- Polling ----
