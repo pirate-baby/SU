@@ -20,15 +20,15 @@ class Settings(BaseSettings):
     playwright_mcp_url: Optional[str] = None
 
     # ProtonMail (optional — enables email management via protonmail-mcp-server)
-    # Both SMTP and IMAP route through Proton Bridge (must be running on host).
+    # Both SMTP and IMAP route through Proton Bridge running as a sidecar container.
     # Password is the Bridge mailbox password, NOT the ProtonMail account password.
-    # Get it from: Proton Bridge app → Settings → Mailbox Password
+    # Get it from: docker compose exec proton-bridge /setup.sh → info
     protonmail_username: Optional[str] = None
     protonmail_password: Optional[str] = None
-    protonmail_smtp_host: str = "host.docker.internal"  # Proton Bridge on Docker host
-    protonmail_smtp_port: int = 1025                    # Proton Bridge SMTP port
-    protonmail_imap_host: str = "host.docker.internal"  # Proton Bridge on Docker host
-    protonmail_imap_port: int = 1143                    # Proton Bridge IMAP port
+    protonmail_smtp_host: str = "proton-bridge"  # Proton Bridge sidecar container
+    protonmail_smtp_port: int = 1025             # Proton Bridge SMTP port
+    protonmail_imap_host: str = "proton-bridge"  # Proton Bridge sidecar container
+    protonmail_imap_port: int = 1143             # Proton Bridge IMAP port
 
     # ElevenLabs Voice Mode
     elevenlabs_api_key: Optional[str] = None

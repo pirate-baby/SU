@@ -88,113 +88,19 @@ else
     echo "Node.js already sufficient: $(node -v)"
 fi
 
-echo "=== 5/7  Proton Bridge (for ProtonMail IMAP/SMTP) ==="
-# Install Proton Bridge as a headless systemd service.
-# Version is resolved dynamically from the GitHub releases API so the script
-# always installs the latest release without needing manual updates.
-# After provisioning, the user must log in once interactively:
-#   sudo -u proton /usr/bin/protonmail-bridge -c
-#   > login       (enter ProtonMail credentials)
-#   > list        (verify the account appears)
-#   > exit
-# Then start/enable the service: systemctl enable --now proton-bridge
-BRIDGE_DEB="/tmp/protonmail-bridge.deb"
-if ! command -v protonmail-bridge &>/dev/null; then
-    echo "Fetching latest Proton Bridge release URL..."
-    BRIDGE_DEB_URL=$(curl -fsSL "https://api.github.com/repos/ProtonMail/proton-bridge/releases/latest" \
-        | python3 -c "import json,sys; r=json.load(sys.stdin); print(next(a['browser_download_url'] for a in r['assets'] if 'amd64' in a['name'] and a['name'].endswith('.deb')))")
-    echo "Downloading Proton Bridge from: $BRIDGE_DEB_URL"
-    curl -fsSL "$BRIDGE_DEB_URL" -o "$BRIDGE_DEB"
-    # Install with apt to auto-resolve any dependencies
-    apt-get install -y "$BRIDGE_DEB"
-    rm -f "$BRIDGE_DEB"
-    echo "Proton Bridge installed"
-else
-    echo "Proton Bridge already installed: $(protonmail-bridge --version 2>/dev/null || echo 'version unknown')"
-fi
-
-# Create a dedicated system user for the bridge daemon (no login shell)
-if ! id proton &>/dev/null; then
-    useradd -r -s /bin/false -m -d /home/proton proton
-    echo "Created 'proton' system user"
-else
-    echo "'proton' user already exists"
-fi
-
-# Generate a passphrase-free GPG key for the bridge (needed for keychain/secret storage)
-# Bridge uses the system keychain; on headless Ubuntu this must be pre-seeded.
-if ! sudo -u proton gpg --list-keys 'ProtonMailBridge' &>/dev/null; then
-    sudo -u proton gpg --batch --passphrase '' --quick-gen-key 'ProtonMailBridge' default default never
-    echo "GPG key generated for proton user"
-else
-    echo "GPG key already exists for proton user"
-fi
-
-# Install systemd service unit for headless bridge operation
-cat > /etc/systemd/system/proton-bridge.service <<'UNIT'
-[Unit]
-Description=Proton Mail Bridge (headless)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=proton
-ExecStart=/usr/bin/protonmail-bridge --noninteractive
-Restart=on-failure
-RestartSec=5
-# Bridge listens on 127.0.0.1 by default (IMAP:1143, SMTP:1025).
-# The Docker container reaches the host via host.docker.internal which
-# resolves to the Docker bridge gateway — NOT 127.0.0.1. We use socat
-# sidecars (below) to forward from 0.0.0.0 to Bridge's localhost ports.
-Environment=HOME=/home/proton
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-
-# Socat port-forwarding services — bridge Docker's host.docker.internal
-# to Proton Bridge's localhost-only listeners.
-# Docker containers reach the host via the bridge gateway IP (e.g. 172.17.0.1).
-# Proton Bridge only binds to 127.0.0.1, so we forward 0.0.0.0:port → 127.0.0.1:port.
-for PROTO_PORT in "imap:1143" "smtp:1025"; do
-    PROTO="${PROTO_PORT%%:*}"
-    PORT="${PROTO_PORT##*:}"
-    cat > "/etc/systemd/system/proton-bridge-${PROTO}-forward.service" <<FWDUNIT
-[Unit]
-Description=Proton Bridge ${PROTO^^} port forward (0.0.0.0:${PORT} → 127.0.0.1:${PORT})
-After=proton-bridge.service
-Requires=proton-bridge.service
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/socat TCP-LISTEN:${PORT},bind=0.0.0.0,reuseaddr,fork TCP:127.0.0.1:${PORT}
-Restart=on-failure
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-FWDUNIT
-done
-
-# Install socat if not present
-if ! command -v socat &>/dev/null; then
-    apt-get install -y socat
-    echo "socat installed (needed for Proton Bridge port forwarding)"
-fi
-
-systemctl daemon-reload
-echo "Proton Bridge systemd service installed (with IMAP/SMTP port forwarding for Docker)"
-echo ""
-echo "  IMPORTANT: Before starting the service, log in interactively as the proton user:"
-echo "    sudo -u proton /usr/bin/protonmail-bridge -c"
-echo "    > login      (follow prompts)"
-echo "    > list       (verify account appears)"
-echo "    > exit"
-echo "  Then:"
-echo "    sudo systemctl enable --now proton-bridge"
-echo "    sudo systemctl enable --now proton-bridge-imap-forward"
-echo "    sudo systemctl enable --now proton-bridge-smtp-forward"
+echo "=== 5/7  Proton Bridge ==="
+# Proton Bridge now runs as a Docker sidecar container (proton-bridge service
+# in docker-compose.yml). No host-side installation needed.
+#
+# First-time setup after `docker compose up -d`:
+#   docker compose exec proton-bridge /setup.sh
+#   (log in, then restart: docker compose restart proton-bridge)
+#
+# Verify connectivity:
+#   docker compose exec proton-bridge /check.sh
+#   docker compose exec proton-bridge /check.sh --emails  (with creds)
+echo "Proton Bridge runs as a Docker sidecar — no host install needed."
+echo "  After startup: docker compose exec proton-bridge /setup.sh"
 echo ""
 
 echo "=== 6/7  Git config ==="
@@ -217,12 +123,9 @@ echo "  Provisioning complete."
 echo ""
 echo "  Next steps:"
 echo "    1. sudo tailscale up"
-echo "    2. Log in to Proton Bridge (if using ProtonMail):"
-echo "         sudo -u proton /usr/bin/protonmail-bridge -c"
-echo "         > login   > list   > exit"
-echo "         sudo systemctl enable --now proton-bridge"
-echo "         sudo systemctl enable --now proton-bridge-imap-forward"
-echo "         sudo systemctl enable --now proton-bridge-smtp-forward"
-echo "    3. cp .env.example .env && vim .env"
-echo "    4. bash startup.sh"
+echo "    2. cp .env.example .env && vim .env"
+echo "    3. bash startup.sh"
+echo "    4. Log in to Proton Bridge (if using ProtonMail):"
+echo "         docker compose exec proton-bridge /setup.sh"
+echo "         docker compose restart proton-bridge"
 echo "========================================="

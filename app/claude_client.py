@@ -108,10 +108,10 @@ def _build_system_prompt() -> str:
         prompt += (
             f"## Email\n\n"
             f"ProtonMail is available via `mcp__protonmail__*` tools. Use them to "
-            f"read, send, search, and manage {user}'s email. Sending works directly "
-            f"via SMTP. Reading/searching requires Proton Bridge running locally "
-            f"(IMAP on localhost:1143). Act on emails without narrating — if asked "
-            f"to send an email, send it. If asked to check email, check it.\n\n"
+            f"read, send, search, and manage {user}'s email. Sending works via SMTP "
+            f"and reading/searching via IMAP, both through the Proton Bridge sidecar "
+            f"container. Act on emails without narrating — if asked to send an email, "
+            f"send it. If asked to check email, check it.\n\n"
         )
 
     if settings.playwright_mcp_url:

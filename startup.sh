@@ -289,39 +289,21 @@ RESTART_PID=$RESTART_PID
 EOF
 
 # ---------------------------------------------------------------------------
-# Proton Bridge (systemd service — managed separately, just check status here)
+# Proton Bridge (Docker sidecar — started with docker compose)
 # ---------------------------------------------------------------------------
-# Proton Bridge runs as a systemd service (User=proton) installed by provision.sh.
-# It exposes IMAP on localhost:1143 so the Docker container can read ProtonMail.
-# The service must be set up manually once with: sudo -u proton protonmail-bridge -c
-# If the service is not running, IMAP email features will be unavailable.
-if systemctl is-active proton-bridge &>/dev/null; then
-    echo "Proton Bridge service is running (IMAP on localhost:1143)"
-    # Check port-forwarding services (needed for Docker container access)
-    FORWARD_OK=true
-    for SVC in proton-bridge-imap-forward proton-bridge-smtp-forward; do
-        if ! systemctl is-active "$SVC" &>/dev/null; then
-            echo "  Warning: $SVC is not running — Docker container cannot reach Proton Bridge."
-            echo "    To fix: sudo systemctl enable --now $SVC"
-            FORWARD_OK=false
-        fi
-    done
-    if [ "$FORWARD_OK" = true ]; then
-        echo "  Port forwarding active (Docker can reach IMAP:1143, SMTP:1025 via host.docker.internal)"
-    fi
-elif pgrep -f 'protonmail-bridge' &>/dev/null; then
-    echo "Proton Bridge is running outside systemd (IMAP on localhost:1143)"
-    echo "  Consider using: sudo systemctl start proton-bridge"
-    echo "  Warning: Docker container may not reach Bridge without port forwarding."
-    echo "  See provision.sh for socat forwarding setup."
-elif systemctl list-unit-files proton-bridge.service 2>/dev/null | grep -q proton-bridge; then
-    echo "Warning: Proton Bridge service is installed but not running."
-    echo "  To start: sudo systemctl start proton-bridge"
-    echo "  (Email reading/searching will be unavailable until Bridge is running)"
-else
-    echo "Proton Bridge not installed — email reading/searching unavailable."
-    echo "  To set up: run provision.sh, then log in with: sudo -u proton protonmail-bridge -c"
-fi
+# Proton Bridge runs as a sidecar container on the claude-network.
+# The claude-executor container reaches it via hostname "proton-bridge"
+# (IMAP:1143, SMTP:1025) — no host networking or socat forwarding needed.
+#
+# First-time setup:
+#   docker compose exec proton-bridge /setup.sh
+#   docker compose restart proton-bridge
+#
+# Verify:
+#   docker compose exec proton-bridge /check.sh --emails
+echo "Proton Bridge runs as a Docker sidecar (proton-bridge container on claude-network)"
+echo "  First-time setup: docker compose exec proton-bridge /setup.sh"
+echo "  Verify: docker compose exec proton-bridge /check.sh --emails"
 
 # ---------------------------------------------------------------------------
 # SSL certificates — prefer Tailscale HTTPS (trusted), fall back to self-signed
@@ -406,7 +388,7 @@ else
 fi
 echo "Playwright MCP server running on: http://localhost:8931/sse"
 echo "Restart server running on: http://localhost:8932/health"
-echo "Proton Bridge (IMAP): localhost:1143 (systemd service — see above)"
+echo "Proton Bridge (IMAP): proton-bridge:1143 (Docker sidecar)"
 echo ""
 echo "To enable self-iteration: set SELF_ITERATION_MODE=true in .env"
 echo "To view logs:"
@@ -414,7 +396,7 @@ echo "  Docker:         docker compose logs -f"
 echo "  Playwright MCP: tail -f $PLAYWRIGHT_LOG"
 echo "  Vibe Kanban:    tail -f $VK_LOG"
 echo "  Restart server: tail -f $RESTART_LOG"
-echo "  Proton Bridge:  sudo journalctl -u proton-bridge -f"
+echo "  Proton Bridge:  docker compose logs -f proton-bridge"
 echo ""
 echo "To stop all services: ./startup.sh stop"
 echo ""

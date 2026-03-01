@@ -1,4 +1,26 @@
 services:
+  proton-bridge:
+    build:
+      context: ./proton-bridge
+      dockerfile: Dockerfile
+    container_name: proton-bridge
+    volumes:
+      # Persist bridge auth state across rebuilds
+      - proton-bridge-config:/home/proton/.config/protonmail
+      - proton-bridge-gnupg:/home/proton/.gnupg
+      - proton-bridge-data:/home/proton/.local/share/protonmail
+      - proton-bridge-cache:/home/proton/.cache/protonmail
+      - proton-bridge-pass:/home/proton/.password-store
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+    networks:
+      - claude-network
+
   claude-executor:
     build:
       context: .
@@ -28,15 +50,18 @@ services:
       - PLAYWRIGHT_MCP_URL=${PLAYWRIGHT_MCP_URL:-http://host.docker.internal:8931/sse}
       - PROTONMAIL_USERNAME=${PROTONMAIL_USERNAME:-}
       - PROTONMAIL_PASSWORD=${PROTONMAIL_PASSWORD:-}
-      - PROTONMAIL_SMTP_HOST=${PROTONMAIL_SMTP_HOST:-host.docker.internal}
+      - PROTONMAIL_SMTP_HOST=${PROTONMAIL_SMTP_HOST:-proton-bridge}
       - PROTONMAIL_SMTP_PORT=${PROTONMAIL_SMTP_PORT:-1025}
-      - PROTONMAIL_IMAP_HOST=${PROTONMAIL_IMAP_HOST:-host.docker.internal}
+      - PROTONMAIL_IMAP_HOST=${PROTONMAIL_IMAP_HOST:-proton-bridge}
       - PROTONMAIL_IMAP_PORT=${PROTONMAIL_IMAP_PORT:-1143}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_WEBHOOK_SECRET=${TELEGRAM_WEBHOOK_SECRET:-}
       - APP_HOST=${APP_HOST:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      proton-bridge:
+        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -78,6 +103,11 @@ services:
 volumes:
   basic-memory-data:
   session-data:
+  proton-bridge-config:
+  proton-bridge-gnupg:
+  proton-bridge-data:
+  proton-bridge-cache:
+  proton-bridge-pass:
 
 networks:
   claude-network:
