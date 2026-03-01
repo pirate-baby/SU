@@ -126,8 +126,12 @@ class CallManager {
 
         this.state = 'active';
         this.overlay.className = 'call-overlay visible active';
-        this.callStartTime = Date.now();
-        this._startTimer();
+
+        // Only reset timer if not already running (e.g. from early "Connecting..." phase)
+        if (!this.timerInterval) {
+            this.callStartTime = Date.now();
+            this._startTimer();
+        }
         this._requestWakeLock();
 
         // Voice mode should already be starting via the mic button handler
@@ -142,9 +146,25 @@ class CallManager {
             voiceMode.endConversation();
         }
 
+        // Notify server of hangup
+        if (typeof ws !== 'undefined' && ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'call_action',
+                action: 'hangup',
+                session_id: typeof SESSION_ID !== 'undefined' ? SESSION_ID : null,
+            }));
+        }
+
         this._stopInterruptDetection();
         this._stopRingtone();
         this._hide();
+
+        // On the dedicated call page, end the session and redirect home
+        if (typeof AUTO_CALL_MODE !== 'undefined' && AUTO_CALL_MODE) {
+            fetch(`/api/sessions/${SESSION_ID}/end`, { method: 'POST' })
+                .then(() => { window.location.href = '/'; })
+                .catch(() => { window.location.href = '/'; });
+        }
     }
 
     // Called when server sends call_ended

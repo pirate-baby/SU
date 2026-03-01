@@ -62,6 +62,16 @@ function connect() {
         // Initialize call manager
         if (typeof callManager !== 'undefined') {
             callManager.init();
+
+            // Show call overlay immediately in "Connecting..." state for call pages
+            // so the user doesn't stare at a blank chat screen during agent init
+            if (typeof AUTO_CALL_MODE !== 'undefined' && AUTO_CALL_MODE) {
+                callManager.state = 'active';
+                callManager.overlay.className = 'call-overlay visible active';
+                callManager.callStartTime = Date.now();
+                callManager._startTimer();
+                callManager._setStateLabel('Connecting...');
+            }
         }
     };
 

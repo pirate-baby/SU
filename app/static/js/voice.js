@@ -175,6 +175,14 @@ class VoiceMode {
             this._cleanup();
             this.state = 'idle';
             this._updateUI();
+
+            // In conversation mode, retry after a brief delay
+            if (this.conversationActive) {
+                console.log('Retrying recording in 1s...');
+                setTimeout(() => {
+                    if (this.conversationActive) this.startRecording();
+                }, 1000);
+            }
         }
     }
 
@@ -268,6 +276,11 @@ class VoiceMode {
             this.state = 'idle';
             this._updateUI();
             this._showPartialTranscript('');
+
+            // In conversation mode, restart recording so the loop doesn't die
+            if (this.conversationActive) {
+                this.startRecording();
+            }
         }
     }
 
