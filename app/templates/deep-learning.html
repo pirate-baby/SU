@@ -561,6 +561,12 @@
                     method: 'POST',
                     body: formData,
                 });
+                if (!resp.ok) {
+                    const text = await resp.text();
+                    let detail = `Server error (${resp.status})`;
+                    try { detail = JSON.parse(text).detail || detail; } catch {}
+                    throw new Error(detail);
+                }
                 const data = await resp.json();
                 dropArea.textContent = `${data.count} file(s) uploaded`;
                 setTimeout(() => {

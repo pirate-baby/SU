@@ -8,7 +8,7 @@ import uuid
 from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from contextlib import asynccontextmanager
@@ -745,36 +745,40 @@ async def api_deep_learning_upload(request: Request):
 
     Expects multipart/form-data with one or more 'files' fields.
     """
-    form = await request.form()
-    files = form.getlist("files")
-    if not files:
-        # Try singular 'file' field too
-        single = form.get("file")
-        if single:
-            files = [single]
-    if not files:
-        raise HTTPException(400, "No files provided. Use 'files' or 'file' field.")
+    try:
+        form = await request.form()
+        files = form.getlist("files")
+        if not files:
+            # Try singular 'file' field too
+            single = form.get("file")
+            if single:
+                files = [single]
+        if not files:
+            return JSONResponse({"detail": "No files provided. Use 'files' or 'file' field."}, status_code=400)
 
-    inbox = ensure_staging_dir()
-    uploaded: list[dict] = []
+        inbox = ensure_staging_dir()
+        uploaded: list[dict] = []
 
-    for upload in files:
-        if not hasattr(upload, "filename"):
-            continue
-        filename = upload.filename or "unnamed"
-        content = await upload.read()
-        dest = inbox / f"{uuid.uuid4().hex[:8]}_{filename}"
-        dest.write_bytes(content)
+        for upload in files:
+            if not hasattr(upload, "filename"):
+                continue
+            filename = upload.filename or "unnamed"
+            content = await upload.read()
+            dest = inbox / f"{uuid.uuid4().hex[:8]}_{filename}"
+            dest.write_bytes(content)
 
-        doc_id = await DLDocRepo.create(
-            filename=filename,
-            file_path=str(dest),
-            file_size=len(content),
-        )
-        uploaded.append({"id": doc_id, "filename": filename, "size": len(content)})
-        log.info("deep_learning.file_uploaded", filename=filename, size=len(content))
+            doc_id = await DLDocRepo.create(
+                filename=filename,
+                file_path=str(dest),
+                file_size=len(content),
+            )
+            uploaded.append({"id": doc_id, "filename": filename, "size": len(content)})
+            log.info("deep_learning.file_uploaded", filename=filename, size=len(content))
 
-    return {"uploaded": uploaded, "count": len(uploaded)}
+        return {"uploaded": uploaded, "count": len(uploaded)}
+    except Exception as exc:
+        log.error("deep_learning.upload_failed", error=str(exc))
+        return JSONResponse({"detail": f"Upload failed: {exc}"}, status_code=500)
 
 
 class DeepLearningStartBody(BaseModel):
