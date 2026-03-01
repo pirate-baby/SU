@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from typing import Any, Callable, Coroutine, Optional
 
 from app.config import settings
-from app.tz import now as local_now
+from app.tz import LOCAL_TZ, now as local_now
 from app.daemon_registry import (
     daemon_registry, DaemonInfo, DaemonCategory, RunStatus,
 )
@@ -167,6 +167,9 @@ class Scheduler:
                 continue
 
             start = datetime.fromisoformat(event["start_time"])
+            # Ensure start is tz-aware (events may be stored without offset)
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=LOCAL_TZ)
             reminder_min = event.get("reminder_minutes") or 30
             remind_at = start - timedelta(minutes=reminder_min)
 
@@ -201,6 +204,8 @@ class Scheduler:
         event_summaries: list[str] = []
         for event in events:
             start = datetime.fromisoformat(event["start_time"])
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=LOCAL_TZ)
             minutes_until = max(0, int((start - now).total_seconds() / 60))
             if minutes_until <= 0:
                 time_str = "starting now"
@@ -280,6 +285,8 @@ class Scheduler:
             # Fallback: create basic text interjections so reminders aren't lost
             for event in events:
                 start = datetime.fromisoformat(event["start_time"])
+                if start.tzinfo is None:
+                    start = start.replace(tzinfo=LOCAL_TZ)
                 minutes_until = max(0, int((start - now).total_seconds() / 60))
                 if minutes_until <= 0:
                     time_str = "starting now"
