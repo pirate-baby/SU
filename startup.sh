@@ -47,96 +47,105 @@ if [ ! -d "$HOME/.claude" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Playwright MCP server (runs on the HOST so it can access Chrome + profile)
+# Playwright MCP server
 # ---------------------------------------------------------------------------
-# Kill any existing Playwright MCP server on port 8931
-if lsof -ti :8931 >/dev/null 2>&1; then
-    echo "Stopping existing Playwright MCP server on port 8931..."
-    lsof -ti :8931 | xargs kill -9 2>/dev/null || true
-    sleep 1
+# If PLAYWRIGHT_MCP_URL points to a remote machine (e.g. a laptop on the same
+# Tailscale network), skip starting a local server entirely. This is the
+# recommended setup: run Playwright MCP on a machine with a real desktop and
+# browser, set PLAYWRIGHT_MCP_URL in .env on the EC2, done.
+#
+# To run Playwright on a remote machine (e.g. your laptop):
+#   npx -y @playwright/mcp@latest --browser chrome --host 0.0.0.0 \
+#       --allowed-hosts '*' --port 8931
+# Then set in .env on the EC2:
+#   PLAYWRIGHT_MCP_URL=http://<tailscale-ip>:8931/sse
+
+# Load PLAYWRIGHT_MCP_URL from .env if not already set
+if [ -z "$PLAYWRIGHT_MCP_URL" ] && [ -f "$SCRIPT_DIR/.env" ]; then
+    PLAYWRIGHT_MCP_URL=$(grep -E '^PLAYWRIGHT_MCP_URL=' "$SCRIPT_DIR/.env" | cut -d'=' -f2- | tr -d '"' | tr -d "'")
 fi
 
-# Ensure Node.js / npm / npx are available on the host
-if ! command -v npx &>/dev/null; then
-    echo "npx not found – installing Node.js..."
-    if [ "$(id -u)" -eq 0 ]; then
-        apt-get update && apt-get install -y nodejs npm
+# Check if PLAYWRIGHT_MCP_URL points to a remote host (not localhost / host.docker.internal)
+PLAYWRIGHT_IS_REMOTE=false
+if [ -n "$PLAYWRIGHT_MCP_URL" ]; then
+    case "$PLAYWRIGHT_MCP_URL" in
+        *host.docker.internal*|*localhost*|*127.0.0.1*) ;;
+        *) PLAYWRIGHT_IS_REMOTE=true ;;
+    esac
+fi
+
+if [ "$PLAYWRIGHT_IS_REMOTE" = true ]; then
+    echo "Playwright MCP server is remote: $PLAYWRIGHT_MCP_URL"
+    echo "  Skipping local Playwright MCP startup."
+    # Quick connectivity check
+    PLAYWRIGHT_REMOTE_HOST=$(echo "$PLAYWRIGHT_MCP_URL" | sed -E 's|https?://([^:/]+).*|\1|')
+    if ping -c 1 -W 2 "$PLAYWRIGHT_REMOTE_HOST" >/dev/null 2>&1; then
+        echo "  Remote host $PLAYWRIGHT_REMOTE_HOST is reachable."
     else
-        sudo apt-get update && sudo apt-get install -y nodejs npm
+        echo "  Warning: Remote host $PLAYWRIGHT_REMOTE_HOST is not reachable."
+        echo "  Make sure the Playwright MCP server is running on the remote machine."
     fi
-    # Verify installation succeeded
+    PLAYWRIGHT_PID=""
+else
+    # --- Local Playwright MCP server ---
+
+    # Kill any existing Playwright MCP server on port 8931
+    if lsof -ti :8931 >/dev/null 2>&1; then
+        echo "Stopping existing Playwright MCP server on port 8931..."
+        lsof -ti :8931 | xargs kill -9 2>/dev/null || true
+        sleep 1
+    fi
+
+    # Ensure Node.js / npm / npx are available on the host
     if ! command -v npx &>/dev/null; then
-        echo "Error: Failed to install Node.js/npm. Please install manually and retry."
+        echo "npx not found – installing Node.js..."
+        if [ "$(id -u)" -eq 0 ]; then
+            apt-get update && apt-get install -y nodejs npm
+        else
+            sudo apt-get update && sudo apt-get install -y nodejs npm
+        fi
+        if ! command -v npx &>/dev/null; then
+            echo "Error: Failed to install Node.js/npm. Please install manually and retry."
+            exit 1
+        fi
+    fi
+
+    # Check Node.js version (Playwright MCP requires Node.js 18+)
+    NODE_VERSION=$(node -v 2>/dev/null | sed 's/^v//' | cut -d. -f1)
+    if [ -z "$NODE_VERSION" ] || [ "$NODE_VERSION" -lt 18 ]; then
+        echo "Error: Node.js 18 or higher is required for Playwright MCP."
+        echo "Current version: $(node -v 2>/dev/null || echo 'not found')"
+        echo ""
+        echo "To upgrade Node.js on Ubuntu:"
+        echo "  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -"
+        echo "  sudo apt-get install -y nodejs"
         exit 1
     fi
-fi
 
-# Check Node.js version (Playwright MCP requires Node.js 18+)
-NODE_VERSION=$(node -v 2>/dev/null | sed 's/^v//' | cut -d. -f1)
-if [ -z "$NODE_VERSION" ] || [ "$NODE_VERSION" -lt 18 ]; then
-    echo "Error: Node.js 18 or higher is required for Playwright MCP."
-    echo "Current version: $(node -v 2>/dev/null || echo 'not found')"
-    echo ""
-    echo "To upgrade Node.js on Ubuntu:"
-    echo "  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -"
-    echo "  sudo apt-get install -y nodejs"
-    echo ""
-    echo "Or use nvm:"
-    echo "  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash"
-    echo "  source ~/.bashrc"
-    echo "  nvm install 20"
-    exit 1
-fi
-
-# Load PLAYWRIGHT_MCP_EXTENSION_TOKEN from .env if not already set
-if [ -z "$PLAYWRIGHT_MCP_EXTENSION_TOKEN" ]; then
-    if [ -f "$SCRIPT_DIR/.env" ]; then
-        PLAYWRIGHT_MCP_EXTENSION_TOKEN=$(grep -E '^PLAYWRIGHT_MCP_EXTENSION_TOKEN=' "$SCRIPT_DIR/.env" | cut -d'=' -f2- | tr -d '"' | tr -d "'")
-    fi
-fi
-export PLAYWRIGHT_MCP_EXTENSION_TOKEN
-
-PLAYWRIGHT_LOG="$LOG_DIR/playwright-mcp.log"
-if [ -n "$PLAYWRIGHT_MCP_EXTENSION_TOKEN" ]; then
-    # --extension      : connect to the existing browser via the Playwright MCP
-    #   Bridge extension instead of launching a new instance. This avoids profile
-    #   lock conflicts and about:blank issues with launchPersistentContext.
-    # --host 0.0.0.0   : accept connections from Docker containers
-    # --allowed-hosts *: disable the Host-header check so that requests arriving
-    #   with "Host: host.docker.internal:8931" (from inside Docker) are not rejected.
-    #
-    # DISPLAY: extension mode spawns Chrome to deliver the relay URL to the
-    # extension. On DCV/headless EC2 the shell may not have DISPLAY set even
-    # though Xorg is running on :0 — export it so Chrome can open the page.
+    # On DCV/headless EC2 the shell may not have DISPLAY set even though Xorg
+    # is running on :0 — export it so Chrome can open a window.
     export DISPLAY="${DISPLAY:-:0}"
-    echo "Starting Playwright MCP server on host (port 8931) in extension mode (DISPLAY=$DISPLAY)..."
-    nohup npx -y @playwright/mcp@latest \
-        --extension \
-        --host 0.0.0.0 \
-        --allowed-hosts '*' \
-        --port 8931 > "$PLAYWRIGHT_LOG" 2>&1 &
-else
-    # No extension token — fall back to headless mode (launches its own browser).
-    # Useful for CI environments or when the Chrome extension isn't available.
-    echo "PLAYWRIGHT_MCP_EXTENSION_TOKEN not set — starting Playwright MCP in headless mode..."
-    nohup npx -y @playwright/mcp@latest \
-        --headless \
-        --host 0.0.0.0 \
-        --allowed-hosts '*' \
-        --port 8931 > "$PLAYWRIGHT_LOG" 2>&1 &
-fi
-PLAYWRIGHT_PID=$!
 
-# Wait briefly and verify the process is still running
-sleep 2
-if ! kill -0 "$PLAYWRIGHT_PID" 2>/dev/null; then
-    echo "Error: Playwright MCP server failed to start. Check $PLAYWRIGHT_LOG"
-    if [ -n "$PLAYWRIGHT_MCP_EXTENSION_TOKEN" ]; then
-        echo "Make sure Chrome is running and the Playwright MCP Bridge extension is installed."
+    PLAYWRIGHT_LOG="$LOG_DIR/playwright-mcp.log"
+    PLAYWRIGHT_USER_DATA_DIR="$HOME/.playwright-mcp-profile"
+    mkdir -p "$PLAYWRIGHT_USER_DATA_DIR"
+
+    echo "Starting Playwright MCP server on host (port 8931) in browser mode (DISPLAY=$DISPLAY)..."
+    nohup npx -y @playwright/mcp@latest \
+        --browser chrome \
+        --user-data-dir "$PLAYWRIGHT_USER_DATA_DIR" \
+        --host 0.0.0.0 \
+        --allowed-hosts '*' \
+        --port 8931 > "$PLAYWRIGHT_LOG" 2>&1 &
+    PLAYWRIGHT_PID=$!
+
+    sleep 2
+    if ! kill -0 "$PLAYWRIGHT_PID" 2>/dev/null; then
+        echo "Error: Playwright MCP server failed to start. Check $PLAYWRIGHT_LOG"
+        exit 1
     fi
-    exit 1
+    echo "Playwright MCP server started (PID $PLAYWRIGHT_PID), logs at $PLAYWRIGHT_LOG"
 fi
-echo "Playwright MCP server started (PID $PLAYWRIGHT_PID), logs at $PLAYWRIGHT_LOG"
 
 # ---------------------------------------------------------------------------
 # ~/Repos directory — isolated from the SU container

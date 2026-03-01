@@ -60,7 +60,25 @@ else
     echo "Docker already installed: $(docker --version)"
 fi
 
-echo "=== 3/6 Node.js 20 (for Playwright MCP, Vibe Kanban) ==="
+echo "=== 3/7 Playwright MCP Bridge Chrome extension (via enterprise policy) ==="
+# The Playwright MCP server in --extension mode spawns Chrome and navigates to
+# chrome-extension://mmlmfjhmonkocbjadbfplnigmagldckm/connect.html to initiate
+# the relay connection. This fails with ERR_BLOCKED_BY_CLIENT if the extension
+# isn't installed. Force-installing via Chrome enterprise policy ensures it's
+# present in every Chrome instance on this machine automatically.
+POLICY_DIR="/etc/opt/chrome/policies/managed"
+POLICY_FILE="$POLICY_DIR/playwright-mcp.json"
+mkdir -p "$POLICY_DIR"
+cat > "$POLICY_FILE" <<'POLICY'
+{
+  "ExtensionInstallForcelist": [
+    "mmlmfjhmonkocbjadbfplnigmagldckm;https://clients2.google.com/service/update2/crx"
+  ]
+}
+POLICY
+echo "Playwright MCP Bridge extension will auto-install in Chrome (policy: $POLICY_FILE)"
+
+echo "=== 4/7 Node.js 20 (for Playwright MCP, Vibe Kanban) ==="
 NODE_VERSION=$(node -v 2>/dev/null | sed 's/^v//' | cut -d. -f1 || echo "0")
 if [ "$NODE_VERSION" -lt 18 ]; then
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
@@ -70,7 +88,7 @@ else
     echo "Node.js already sufficient: $(node -v)"
 fi
 
-echo "=== 4/6  Proton Bridge (for ProtonMail IMAP/SMTP) ==="
+echo "=== 5/7  Proton Bridge (for ProtonMail IMAP/SMTP) ==="
 # Install Proton Bridge as a headless systemd service.
 # Version is resolved dynamically from the GitHub releases API so the script
 # always installs the latest release without needing manual updates.
@@ -179,12 +197,12 @@ echo "    sudo systemctl enable --now proton-bridge-imap-forward"
 echo "    sudo systemctl enable --now proton-bridge-smtp-forward"
 echo ""
 
-echo "=== 5/6  Git config ==="
+echo "=== 6/7  Git config ==="
 su - ubuntu -c 'git config --global user.email "su@localhost"'
 su - ubuntu -c 'git config --global user.name "SU"'
 echo "Git configured for ubuntu user"
 
-echo "=== 6/6  Permissions ==="
+echo "=== 7/7  Permissions ==="
 # Ensure ubuntu owns the repo
 if [ -d "$UBUNTU_HOME/SU" ]; then
     chown -R ubuntu:ubuntu "$UBUNTU_HOME/SU"
