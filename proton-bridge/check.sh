@@ -99,12 +99,17 @@ from email.header import decode_header
 host, port, username, password = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
 
 try:
-    # Proton Bridge uses a self-signed TLS cert on its IMAP port
+    # Proton Bridge may use implicit TLS (IMAP4_SSL) or STARTTLS.
+    # Try SSL first, fall back to STARTTLS.
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
 
-    imap = imaplib.IMAP4_SSL(host, port, ssl_context=ctx)
+    try:
+        imap = imaplib.IMAP4_SSL(host, port, ssl_context=ctx)
+    except ssl.SSLError:
+        imap = imaplib.IMAP4(host, port)
+        imap.starttls(ssl_context=ctx)
     typ, data = imap.login(username, password)
     print(f"   Login: {typ} — {data[0].decode()}")
 
