@@ -307,6 +307,30 @@ async def init_database():
             ON deep_learning_runs(status)
         """)
 
+        # -- Unsubscribed senders (tracks email unsubscribe actions) --
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS unsubscribed_senders (
+                id TEXT PRIMARY KEY,
+                sender_email TEXT NOT NULL,
+                sender_domain TEXT NOT NULL,
+                unsubscribe_method TEXT NOT NULL,
+                unsubscribe_target TEXT,
+                status TEXT DEFAULT 'completed',
+                error TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        await db.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_unsubscribed_sender_email
+            ON unsubscribed_senders(sender_email)
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_unsubscribed_domain
+            ON unsubscribed_senders(sender_domain)
+        """)
+
         # -- Health snapshots (for monitoring trends) --
         await db.execute("""
             CREATE TABLE IF NOT EXISTS health_snapshots (

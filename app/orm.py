@@ -91,6 +91,22 @@ class TelegramUserRow(Base):
         return {c.key: getattr(self, c.key) for c in self.__table__.columns}
 
 
+class UnsubscribedSenderRow(Base):
+    __tablename__ = "unsubscribed_senders"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    sender_email: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    sender_domain: Mapped[str] = mapped_column(String, nullable=False)
+    unsubscribe_method: Mapped[str] = mapped_column(String, nullable=False)
+    unsubscribe_target: Mapped[Optional[str]] = mapped_column(String, default=None)
+    status: Mapped[str] = mapped_column(String, default="completed")
+    error: Mapped[Optional[str]] = mapped_column(Text, default=None)
+    created_at: Mapped[Optional[str]] = mapped_column(String, default=None)
+
+    def to_dict(self) -> dict:
+        return {c.key: getattr(self, c.key) for c in self.__table__.columns}
+
+
 class SuNoteRow(Base):
     __tablename__ = "su_notes"
 

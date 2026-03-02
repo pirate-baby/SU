@@ -10,7 +10,7 @@ from sqlalchemy import select, update, delete
 
 from app.database import async_session
 from app.models import Task, Event, Interjection, SuNote
-from app.orm import TaskRow, EventRow, InterjectionRow, SuNoteRow
+from app.orm import TaskRow, EventRow, InterjectionRow, SuNoteRow, UnsubscribedSenderRow
 from app.tz import now_iso
 
 
@@ -463,4 +463,57 @@ class SuNoteRepo:
                 )
             )
             await session.commit()
+
+
+# ---------------------------------------------------------------------------
+# Unsubscribed Senders (tracks email unsubscribe actions)
+# ---------------------------------------------------------------------------
+
+class UnsubscribedSenderRepo:
+    """CRUD operations for the unsubscribed_senders table."""
+
+    @staticmethod
+    async def is_unsubscribed(sender_email: str) -> bool:
+        """Check if we've already unsubscribed from this sender."""
+        async with async_session() as session:
+            result = await session.execute(
+                select(UnsubscribedSenderRow)
+                .where(UnsubscribedSenderRow.sender_email == sender_email.lower())
+            )
+            return result.scalar_one_or_none() is not None
+
+    @staticmethod
+    async def record(
+        sender_email: str,
+        sender_domain: str,
+        unsubscribe_method: str,
+        unsubscribe_target: Optional[str] = None,
+        status: str = "completed",
+        error: Optional[str] = None,
+    ) -> None:
+        """Record an unsubscribe action."""
+        row = UnsubscribedSenderRow(
+            id=str(uuid.uuid4()),
+            sender_email=sender_email.lower(),
+            sender_domain=sender_domain.lower(),
+            unsubscribe_method=unsubscribe_method,
+            unsubscribe_target=unsubscribe_target,
+            status=status,
+            error=error,
+            created_at=_now(),
+        )
+        async with async_session() as session:
+            session.add(row)
+            await session.commit()
+
+    @staticmethod
+    async def list_all(limit: int = 200) -> list[dict[str, Any]]:
+        """List all unsubscribed senders."""
+        async with async_session() as session:
+            result = await session.execute(
+                select(UnsubscribedSenderRow)
+                .order_by(UnsubscribedSenderRow.created_at.desc())
+                .limit(limit)
+            )
+            return [row.to_dict() for row in result.scalars().all()]
 

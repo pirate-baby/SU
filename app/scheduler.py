@@ -7,6 +7,7 @@ Jobs:
   - interjection_delivery: push pending interjections to connected clients.
   - note_processor: process SU's internal notes-to-self (every 10 min).
   - email_scanner: triage inbox via ProtonMail MCP (every 10 min).
+  - email_unsubscriber: process unsubscribe requests from scanner (every 30 min).
   - daily_review: compose morning brief from tasks/events/notes (once/day).
 """
 import asyncio
@@ -75,6 +76,13 @@ class Scheduler:
                 interval_seconds=600,
                 description="Triages inbox via ProtonMail, creates tasks and notes",
             ))
+            daemon_registry.register(DaemonInfo(
+                name="email_unsubscriber",
+                display_name="Email Unsubscriber",
+                category=DaemonCategory.SCHEDULER,
+                interval_seconds=1800,
+                description="Processes unsubscribe requests from email scanner via SU notes",
+            ))
         daemon_registry.register(DaemonInfo(
             name="daily_review",
             display_name="Daily Review",
@@ -104,11 +112,15 @@ class Scheduler:
             name="sched-note-processor",
         )
 
-        # Email scanner — only if ProtonMail is configured
+        # Email scanner and unsubscriber — only if ProtonMail is configured
         if settings.protonmail_username and settings.protonmail_password:
             self._tasks["email_scanner"] = asyncio.create_task(
                 self._periodic("email_scanner", self._email_scanner, interval=600),
                 name="sched-email-scanner",
+            )
+            self._tasks["email_unsubscriber"] = asyncio.create_task(
+                self._periodic("email_unsubscriber", self._email_unsubscriber, interval=1800),
+                name="sched-email-unsubscriber",
             )
 
         # Daily review — runs every hour, but only fires once per day
@@ -590,6 +602,17 @@ class Scheduler:
             "if it doesn't exist.\n"
             "- Spam/newsletters/junk: delete with delete_email.\n"
             "- Everything else: archive by moving to 'Archive' folder.\n\n"
+            "UNSUBSCRIBE: When you delete a newsletter/spam/marketing email, look for an "
+            "unsubscribe link in the email body (text like 'unsubscribe', 'opt out', "
+            "'manage preferences', 'email preferences' with an href URL). If you find one, "
+            "first use check_unsubscribed with the sender email to see if we already handled "
+            "this sender. If NOT already unsubscribed, create a SU note with:\n"
+            "  - note_type: 'todo'\n"
+            "  - source: 'email_scanner'\n"
+            "  - content: 'Unsubscribe from <sender name/email>'\n"
+            "  - context_json: JSON string with keys: sender_email, sender_name, "
+            "unsubscribe_url (the https:// or mailto: link), email_subject\n"
+            "This note will be picked up by the unsubscriber daemon later.\n\n"
             "The inbox should be EMPTY when you are done.\n\n"
             "Check the knowledge base for context about people/projects mentioned. "
             "Don't create duplicate tasks for things already tracked. "
@@ -624,10 +647,13 @@ class Scheduler:
             },
         }
 
+        from app.unsubscribe_manager import unsubscribe_manager_mcp_server
+
         mcp_servers = {
             "basic_memory": get_basic_memory_mcp_config(),
             "life_manager": life_manager_mcp_server,
             "su_notes_manager": su_notes_mcp_server,
+            "unsubscribe_manager": unsubscribe_manager_mcp_server,
             "protonmail": protonmail_mcp,
         }
         allowed = [
@@ -649,6 +675,7 @@ class Scheduler:
             "mcp__su_notes_manager__create_su_note",
             "mcp__su_notes_manager__list_su_notes",
             "mcp__su_notes_manager__update_su_note",
+            "mcp__unsubscribe_manager__check_unsubscribed",
         ]
 
         if settings.telegram_bot_token:
@@ -787,6 +814,220 @@ class Scheduler:
                 emails_found=emails_found,
                 emails_moved=emails_moved,
                 emails_deleted=emails_deleted,
+                tool_errors=tool_errors,
+                tool_calls=tool_calls,
+            )
+            raise
+
+    # ------------------------------------------------------------------
+    # Email Unsubscriber: process pending unsubscribe requests
+    # ------------------------------------------------------------------
+
+    async def _email_unsubscriber(self) -> dict:
+        """Process pending unsubscribe SU notes created by the email scanner."""
+        # Find active SU notes from email_scanner that are about unsubscribing
+        notes = await SuNoteRepo.list(
+            status="active", source="email_scanner", limit=50,
+        )
+        unsub_notes = [
+            n for n in notes
+            if "unsubscribe" in (n.get("content", "")).lower()
+        ]
+
+        if not unsub_notes:
+            return {"unsubscribe_notes_found": 0}
+
+        log.info("scheduler.email_unsubscriber_starting", count=len(unsub_notes))
+        return await self._run_email_unsubscriber_agent(unsub_notes)
+
+    async def _run_email_unsubscriber_agent(self, notes: list[dict]) -> dict:
+        """Spawn a subagent to execute unsubscribe actions."""
+        from claude_agent_sdk import (
+            AssistantMessage,
+            ClaudeAgentOptions,
+            ClaudeSDKClient,
+            ResultMessage,
+            SystemMessage,
+            ToolResultBlock,
+            ToolUseBlock,
+            UserMessage,
+        )
+        from app.su_notes_manager import su_notes_mcp_server
+        from app.unsubscribe_manager import unsubscribe_manager_mcp_server
+        from app.scary_internet_agent import scary_internet_mcp_server
+        from app.process_limiter import claude_process_slot
+
+        # Build note summaries for the prompt
+        note_summaries = []
+        for note in notes:
+            ctx = note.get("context_json", "")
+            note_summaries.append(
+                f"- Note [{note['id']}]: {note['content']} | context: {ctx}"
+            )
+
+        now = local_now()
+        prompt = (
+            f"Current time: {now.isoformat()}\n\n"
+            "Process the following unsubscribe requests:\n\n"
+            + "\n".join(note_summaries) + "\n\n"
+            "For each one:\n"
+            "1. First check if we've already unsubscribed from this sender "
+            "(use check_unsubscribed).\n"
+            "2. If already unsubscribed, just complete the SU note and move on.\n"
+            "3. Parse the unsubscribe_url from the note's context_json:\n"
+            "   - If it's a mailto: URL, extract the email address and any subject "
+            "parameter, then use send_email to send an unsubscribe email.\n"
+            "   - If it's an https:// URL, use the dangerous_assignment tool to visit "
+            "the page and click any confirm/unsubscribe buttons. Set websites_allowed "
+            "to [the unsubscribe URL] and use this response_schema:\n"
+            '   {"type": "object", "properties": {"success": {"type": "boolean"}, '
+            '"message": {"type": "string"}}, "required": ["success", "message"], '
+            '"additionalProperties": false}\n'
+            "4. Record the result with record_unsubscribe (status: completed or failed).\n"
+            "5. Complete the SU note when done (use complete_su_note).\n\n"
+            "If an unsubscribe page asks for an email address to confirm, "
+            "do NOT enter one — record as failed with an explanation. "
+            "Be efficient — don't waste turns on retries."
+        )
+
+        system_prompt = (
+            f"You are {settings.su_name}'s email unsubscriber daemon. You process "
+            "unsubscribe requests identified by the email scanner. You can send "
+            "emails (for mailto: unsubscribe links) and use the dangerous_assignment "
+            "browser tool (for https: unsubscribe links). "
+            "Headless — no clarifying questions."
+        )
+
+        protonmail_mcp = {
+            "type": "stdio",
+            "command": "protonmail-mcp-server",
+            "args": [],
+            "env": {
+                "PROTONMAIL_USERNAME": settings.protonmail_username,
+                "PROTONMAIL_PASSWORD": settings.protonmail_password,
+                "PROTONMAIL_SMTP_HOST": settings.protonmail_smtp_host,
+                "PROTONMAIL_SMTP_PORT": str(settings.protonmail_smtp_port),
+                "PROTONMAIL_IMAP_HOST": settings.protonmail_imap_host,
+                "PROTONMAIL_IMAP_PORT": str(settings.protonmail_imap_port),
+            },
+        }
+
+        mcp_servers = {
+            "protonmail": protonmail_mcp,
+            "scary_internet": scary_internet_mcp_server,
+            "unsubscribe_manager": unsubscribe_manager_mcp_server,
+            "su_notes_manager": su_notes_mcp_server,
+        }
+        allowed = [
+            "mcp__protonmail__send_email",
+            "mcp__scary_internet__dangerous_assignment",
+            "mcp__unsubscribe_manager__check_unsubscribed",
+            "mcp__unsubscribe_manager__record_unsubscribe",
+            "mcp__unsubscribe_manager__list_unsubscribed",
+            "mcp__su_notes_manager__update_su_note",
+            "mcp__su_notes_manager__complete_su_note",
+        ]
+
+        options = ClaudeAgentOptions(
+            mcp_servers=mcp_servers,
+            allowed_tools=allowed,
+            disallowed_tools=[
+                "Task", "Bash", "Glob", "Grep", "Read", "Edit", "Write",
+                "WebFetch", "WebSearch", "NotebookEdit",
+            ],
+            permission_mode="bypassPermissions",
+            max_turns=30,
+            system_prompt=system_prompt,
+        )
+
+        # Counters for observability
+        notes_processed = 0
+        unsubscribes_completed = 0
+        unsubscribes_failed = 0
+        tool_errors = 0
+        tool_calls: dict[str, int] = {}
+        pending_tool_ids: dict[str, str] = {}
+
+        try:
+            async with claude_process_slot(timeout=300, name="email_unsubscriber"), ClaudeSDKClient(options=options) as client:
+                await client.query(prompt)
+                async for message in client.receive_response():
+                    if isinstance(message, SystemMessage):
+                        if message.subtype == "init":
+                            for srv in message.data.get("mcp_servers", []):
+                                name = srv.get("name", "unknown")
+                                status = srv.get("status", "unknown")
+                                if status != "connected":
+                                    log.error(
+                                        "scheduler.email_unsubscriber_mcp_failed",
+                                        server_name=name,
+                                        server_status=status,
+                                    )
+                                else:
+                                    log.debug(
+                                        "scheduler.email_unsubscriber_mcp_connected",
+                                        server_name=name,
+                                    )
+
+                    elif isinstance(message, AssistantMessage):
+                        for block in message.content:
+                            if isinstance(block, ToolUseBlock):
+                                tool_calls[block.name] = tool_calls.get(block.name, 0) + 1
+                                pending_tool_ids[block.id] = block.name
+                                log.debug(
+                                    "scheduler.email_unsubscriber_tool_use",
+                                    tool=block.name,
+                                    input=str(block.input)[:300],
+                                )
+
+                    elif isinstance(message, UserMessage):
+                        content = message.content
+                        if isinstance(content, list):
+                            for block in content:
+                                if isinstance(block, ToolResultBlock):
+                                    tool_name = pending_tool_ids.pop(block.tool_use_id, "unknown")
+                                    if block.is_error:
+                                        tool_errors += 1
+                                        log.warning(
+                                            "scheduler.email_unsubscriber_tool_error",
+                                            tool=tool_name,
+                                            content=str(block.content)[:500],
+                                        )
+
+                    elif isinstance(message, ResultMessage):
+                        if message.is_error:
+                            log.warning(
+                                "scheduler.email_unsubscriber_error",
+                                result=message.result or "unknown",
+                            )
+                            return {
+                                "unsubscribe_notes_found": len(notes),
+                                "tool_errors": tool_errors,
+                                "error": message.result or "unknown",
+                            }
+
+            # Derive counts from tool calls
+            notes_processed = tool_calls.get("mcp__su_notes_manager__complete_su_note", 0)
+            unsubscribes_completed = tool_calls.get("mcp__unsubscribe_manager__record_unsubscribe", 0)
+
+            log.info(
+                "scheduler.email_unsubscriber_completed",
+                unsubscribe_notes_found=len(notes),
+                notes_processed=notes_processed,
+                unsubscribes_completed=unsubscribes_completed,
+                tool_errors=tool_errors,
+                tool_calls=tool_calls,
+            )
+            return {
+                "unsubscribe_notes_found": len(notes),
+                "notes_processed": notes_processed,
+                "unsubscribes_completed": unsubscribes_completed,
+                "tool_errors": tool_errors,
+            }
+        except Exception:
+            log.exception(
+                "scheduler.email_unsubscriber_failed",
+                unsubscribe_notes_found=len(notes),
                 tool_errors=tool_errors,
                 tool_calls=tool_calls,
             )
