@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     # ProtonMail (optional — enables email management via protonmail-mcp-server)
     # Both SMTP and IMAP route through Proton Bridge running as a sidecar container.
     # Password is the Bridge mailbox password, NOT the ProtonMail account password.
-    # Get it from: docker compose run --rm proton-bridge /setup.sh → info
+    # Get it from: docker compose run --rm proton-bridge setup → info
     protonmail_username: Optional[str] = None
     protonmail_password: Optional[str] = None
     protonmail_smtp_host: str = "proton-bridge"  # Proton Bridge sidecar container

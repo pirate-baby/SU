@@ -297,13 +297,13 @@ EOF
 #
 # First-time setup:
 #   docker compose stop proton-bridge
-#   docker compose run --rm proton-bridge /setup.sh
-#   docker compose start proton-bridge
+#   docker compose run --rm proton-bridge setup
+#   docker compose up -d proton-bridge
 #
 # Verify:
 #   docker compose exec proton-bridge /check.sh --emails
 echo "Proton Bridge runs as a Docker sidecar (proton-bridge container on claude-network)"
-echo "  First-time setup: docker compose stop proton-bridge && docker compose run --rm proton-bridge /setup.sh && docker compose start proton-bridge"
+echo "  First-time setup: docker compose stop proton-bridge && docker compose run --rm proton-bridge setup && docker compose up -d proton-bridge"
 echo "  Verify: docker compose exec proton-bridge /check.sh --emails"
 
 # ---------------------------------------------------------------------------

@@ -11,7 +11,7 @@
 #
 # First-time setup (after `docker compose up -d`):
 #   docker compose stop proton-bridge
-#   docker compose run --rm proton-bridge /setup.sh
+#   docker compose run --rm proton-bridge setup
 #   docker compose start proton-bridge
 #
 # Verify:

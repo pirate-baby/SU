@@ -3,17 +3,15 @@
 #
 # Runs as root to fix volume permissions, then drops to the proton user.
 #
+# Modes:
+#   (no args)   — Daemon mode: start bridge + socat forwarders
+#   setup       — Interactive CLI for one-time login (stop daemon first!)
+#   check [..]. — Run the sanity-check script
+#   *           — Run arbitrary command as proton user
+#
 # The pre-built bridge binary only listens on 127.0.0.1:{1143,1025}.
 # Other containers on the Docker network connect to this container's
 # network IP, so we need to expose those ports externally via socat.
-#
-# Strategy:
-#   1. Fix ownership on volume-mounted directories (may be root from first run)
-#   2. Start bridge as proton user in the background (binds 127.0.0.1:1143/1025)
-#   3. Wait for bridge ports to open
-#   4. Start socat forwarders on the container's non-loopback IP
-#      (eth0 IP:port → 127.0.0.1:port) so there's no port conflict
-#   5. Wait on the bridge process — if it exits, the container exits.
 
 set -e
 
@@ -25,6 +23,43 @@ chown -R proton:proton \
     /home/proton/.cache \
     /home/proton/.password-store \
     2>/dev/null || true
+
+# --- Mode dispatch ---
+
+case "${1:-}" in
+    setup)
+        echo "============================================"
+        echo "  Proton Bridge — Interactive Setup"
+        echo "============================================"
+        echo ""
+        echo "Commands you'll need:"
+        echo "  login    — Log in with your ProtonMail credentials"
+        echo "  list     — Verify your account is connected"
+        echo "  info     — Show the Bridge mailbox password (for PROTONMAIL_PASSWORD in .env)"
+        echo "  exit     — Done"
+        echo ""
+        echo "After exiting, start the bridge:"
+        echo "  docker compose up -d proton-bridge"
+        echo ""
+        exec gosu proton /usr/bin/protonmail-bridge --cli
+        ;;
+
+    check)
+        shift
+        exec /check.sh "$@"
+        ;;
+
+    "")
+        # Default: daemon mode (fall through below)
+        ;;
+
+    *)
+        # Arbitrary command
+        exec gosu proton "$@"
+        ;;
+esac
+
+# --- Daemon mode ---
 
 # Start bridge as proton user in the background
 gosu proton /usr/bin/protonmail-bridge --noninteractive --log-level info &
