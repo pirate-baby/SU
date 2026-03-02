@@ -26,9 +26,19 @@ echo "  list     — Verify your account is connected"
 echo "  info     — Show the Bridge mailbox password (for PROTONMAIL_PASSWORD in .env)"
 echo "  exit     — Done (then restart the container)"
 echo ""
+
+# Kill ALL running bridge processes (started by entrypoint via gosu)
 echo "Stopping running bridge instance..."
-killall protonmail-bridge 2>/dev/null || true
+pkill -9 -f protonmail-bridge 2>/dev/null || true
 sleep 2
+
+# Remove stale lock file — bridge doesn't clean up after SIGKILL
+find /home/proton -name '*.lock' -path '*protonmail*' -delete 2>/dev/null || true
+find /home/proton -name '.lock' -path '*bridge*' -delete 2>/dev/null || true
+# Common lock file locations for bridge v3
+rm -f /home/proton/.cache/protonmail/bridge-v3/bridge.lock 2>/dev/null
+rm -f /home/proton/.config/protonmail/bridge-v3/bridge.lock 2>/dev/null
+rm -f /home/proton/.local/share/protonmail/bridge-v3/bridge.lock 2>/dev/null
 
 echo "Starting Bridge CLI..."
 echo ""
