@@ -5,7 +5,7 @@
 #
 # Modes:
 #   (no args)   — Daemon mode: start bridge + socat forwarders
-#   setup       — Interactive CLI for one-time login (stop daemon first!)
+#   setup       — Interactive CLI for one-time login
 #   check [..]. — Run the sanity-check script
 #   *           — Run arbitrary command as proton user
 #
@@ -28,6 +28,12 @@ chown -R proton:proton \
 
 case "${1:-}" in
     setup)
+        # The bridge uses OS-level file locking. If the daemon container is
+        # still running, it holds the lock and we can't start the CLI.
+        # Remove stale lock files (from crashed containers) and try.
+        find /home/proton -name '*.lock' -delete 2>/dev/null || true
+        find /tmp -name '*proton*bridge*' -delete 2>/dev/null || true
+
         echo "============================================"
         echo "  Proton Bridge — Interactive Setup"
         echo "============================================"
@@ -41,7 +47,23 @@ case "${1:-}" in
         echo "After exiting, start the bridge:"
         echo "  docker compose up -d proton-bridge"
         echo ""
-        exec gosu proton /usr/bin/protonmail-bridge --cli
+
+        # Try to launch. If it fails with lock error, give a clear message.
+        gosu proton /usr/bin/protonmail-bridge --cli
+        EXIT_CODE=$?
+        if [ "$EXIT_CODE" -ne 0 ]; then
+            echo ""
+            echo "============================================"
+            echo "  Bridge CLI failed to start (exit $EXIT_CODE)."
+            echo ""
+            echo "  If you see 'lock file' errors, the daemon"
+            echo "  container is still running. Stop it first:"
+            echo ""
+            echo "    docker compose stop proton-bridge"
+            echo "    docker compose run --rm proton-bridge setup"
+            echo "============================================"
+        fi
+        exit $EXIT_CODE
         ;;
 
     check)
@@ -60,6 +82,10 @@ case "${1:-}" in
 esac
 
 # --- Daemon mode ---
+
+# Remove stale lock files from a previous crash
+find /home/proton -name '*.lock' -delete 2>/dev/null || true
+find /tmp -name '*proton*bridge*' -delete 2>/dev/null || true
 
 # Start bridge as proton user in the background
 gosu proton /usr/bin/protonmail-bridge --noninteractive --log-level info &
