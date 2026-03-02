@@ -177,14 +177,7 @@ function handleMessage(data) {
             break;
 
         case 'audio_end':
-            if (typeof voiceMode !== 'undefined') {
-                if (data.filler) {
-                    // Filler audio finished — don't treat as final audio end
-                    voiceMode.handleFillerEnd();
-                } else {
-                    voiceMode.handleAudioEnd();
-                }
-            }
+            if (typeof voiceMode !== 'undefined') voiceMode.handleAudioEnd();
             break;
 
         case 'voice_conversation_end':

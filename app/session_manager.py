@@ -153,6 +153,19 @@ async def mark_memories_consumed(message_id: int) -> None:
         await db.commit()
 
 
+async def mark_memories_consumed_batch(message_ids: list[int]) -> None:
+    """Mark multiple memory messages as consumed in a single transaction."""
+    if not message_ids:
+        return
+    async with get_db() as db:
+        placeholders = ",".join("?" for _ in message_ids)
+        await db.execute(
+            f"UPDATE messages SET role = 'memory_consumed' WHERE id IN ({placeholders})",
+            message_ids,
+        )
+        await db.commit()
+
+
 async def get_active_session_ids() -> List[str]:
     """Return IDs of all sessions with status='active'."""
     async with get_db() as db:

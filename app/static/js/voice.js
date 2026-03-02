@@ -30,6 +30,9 @@ class VoiceMode {
         this.playedAudioChunks = 0;
         this.audioEndReceived = false;
         this._scheduledSources = []; // active AudioBufferSourceNodes for cancelPlayback
+        this._preBufferQueue = []; // queue chunks before playback starts
+        this._preBufferCount = 3; // wait for N chunks before scheduling playback
+        this._playbackStarted = false;
 
         // UI elements (set during init)
         this.micBtn = null;
@@ -290,12 +293,12 @@ class VoiceMode {
         if (this.state !== 'playing') {
             this.state = 'playing';
             this._ensurePlaybackContext();
-            // Small initial buffer (200ms) to let first chunk decode before playing
-            this.nextPlayTime = this.playbackContext.currentTime + 0.2;
             this.pendingAudioChunks = 0;
             this.playedAudioChunks = 0;
             this.audioEndReceived = false;
             this._scheduledSources = [];
+            this._preBufferQueue = [];
+            this._playbackStarted = false;
             this._updateUI();
 
             // Notify call manager
@@ -316,25 +319,15 @@ class VoiceMode {
         this.playbackContext.decodeAudioData(
             bytes.buffer.slice(0), // slice to get a transferable copy
             (buffer) => {
-                const source = this.playbackContext.createBufferSource();
-                source.buffer = buffer;
-                source.connect(this.playbackContext.destination);
-
-                // Track for cancelPlayback
-                this._scheduledSources.push(source);
-
-                // Schedule seamlessly — small overlap tolerance to prevent gaps
-                const startTime = Math.max(this.playbackContext.currentTime, this.nextPlayTime);
-                source.start(startTime);
-                // Subtract a tiny overlap (5ms) to prevent audible gaps between chunks
-                this.nextPlayTime = startTime + buffer.duration - 0.005;
-
-                source.onended = () => {
-                    const idx = this._scheduledSources.indexOf(source);
-                    if (idx !== -1) this._scheduledSources.splice(idx, 1);
-                    this.playedAudioChunks++;
-                    this._checkPlaybackComplete();
-                };
+                if (!this._playbackStarted) {
+                    // Pre-buffer: collect decoded chunks before starting playback
+                    this._preBufferQueue.push(buffer);
+                    if (this._preBufferQueue.length >= this._preBufferCount) {
+                        this._flushPreBuffer();
+                    }
+                } else {
+                    this._scheduleBuffer(buffer);
+                }
             },
             (err) => {
                 // Decode error — skip this chunk
@@ -345,12 +338,47 @@ class VoiceMode {
         );
     }
 
+    _flushPreBuffer() {
+        if (this._playbackStarted) return;
+        this._playbackStarted = true;
+        // Start playback 100ms from now — all pre-buffered chunks are already decoded
+        this.nextPlayTime = this.playbackContext.currentTime + 0.1;
+        for (const buffer of this._preBufferQueue) {
+            this._scheduleBuffer(buffer);
+        }
+        this._preBufferQueue = [];
+    }
+
+    _scheduleBuffer(buffer) {
+        const source = this.playbackContext.createBufferSource();
+        source.buffer = buffer;
+        source.connect(this.playbackContext.destination);
+
+        // Track for cancelPlayback
+        this._scheduledSources.push(source);
+
+        // Schedule seamlessly — small overlap tolerance to prevent gaps
+        const startTime = Math.max(this.playbackContext.currentTime, this.nextPlayTime);
+        source.start(startTime);
+        // Subtract a tiny overlap (5ms) to prevent audible gaps between chunks
+        this.nextPlayTime = startTime + buffer.duration - 0.005;
+
+        source.onended = () => {
+            const idx = this._scheduledSources.indexOf(source);
+            if (idx !== -1) this._scheduledSources.splice(idx, 1);
+            this.playedAudioChunks++;
+            this._checkPlaybackComplete();
+        };
+    }
+
     cancelPlayback() {
         // Stop all scheduled/playing audio sources immediately
         for (const source of this._scheduledSources) {
             try { source.stop(); } catch {}
         }
         this._scheduledSources = [];
+        this._preBufferQueue = [];
+        this._playbackStarted = false;
         this.pendingAudioChunks = 0;
         this.playedAudioChunks = 0;
         this.audioEndReceived = true;
@@ -358,16 +386,13 @@ class VoiceMode {
         this._updateUI();
     }
 
-    handleFillerEnd() {
-        // Filler audio finished — let any queued chunks play out but don't
-        // trigger the conversation loop or state transition. The real response
-        // audio will arrive after assistant_start and have its own audio_end.
-        // Nothing to do — chunks will play out naturally and the real
-        // audio_end will be the one that matters.
-    }
-
     handleAudioEnd() {
         this.audioEndReceived = true;
+        // If we haven't started playback yet (short response with fewer chunks
+        // than _preBufferCount), flush whatever we have now.
+        if (!this._playbackStarted && this._preBufferQueue.length > 0) {
+            this._flushPreBuffer();
+        }
         this._checkPlaybackComplete();
     }
 
@@ -396,9 +421,30 @@ class VoiceMode {
     _ensurePlaybackContext() {
         if (!this.playbackContext || this.playbackContext.state === 'closed') {
             this.playbackContext = new AudioContext();
+            // Warm up the MP3 decoder by decoding a tiny silent MP3 frame.
+            // This forces the browser to initialize its audio decode pipeline
+            // so the first real TTS chunk doesn't stutter.
+            this._warmUpDecoder();
         }
         if (this.playbackContext.state === 'suspended') {
             this.playbackContext.resume();
+        }
+    }
+
+    _warmUpDecoder() {
+        // Minimal valid MP3 frame (~192 bytes of silence) — enough to trigger
+        // the browser's decoder initialization without audible output.
+        // This is a single MPEG-1 Layer 3 frame at 128kbps, 44100Hz, silence.
+        const silentMp3B64 = '//uQxAAAAAANIAAAAAExBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV';
+        try {
+            const binary = atob(silentMp3B64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+            this.playbackContext.decodeAudioData(bytes.buffer.slice(0), () => {}, () => {});
+        } catch {
+            // Warm-up is best-effort
         }
     }
 

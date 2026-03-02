@@ -40,6 +40,20 @@ SUBCONSCIOUS_SYSTEM_PROMPT = (
     "Headless. No clarifying questions."
 )
 
+# Faster variant for the first message — one search + one calendar check, done.
+SUBCONSCIOUS_QUICK_PROMPT = (
+    "You surface relevant memory and schedule context for SU. Given a "
+    "conversation summary, do ONE quick knowledge-base search and ONE "
+    "calendar/task check, then immediately write your thought.\n\n"
+    "Be fast — pick the single best search query, check today's schedule, "
+    "and respond. Do NOT do multiple searches or follow-up reads.\n\n"
+    "If you find something worth surfacing, write one or two sentences — "
+    "natural, first-person, as if it just occurred to you. No preamble. "
+    "No mention of databases or search results.\n\n"
+    f"If nothing is relevant, respond with exactly: {NO_MEMORY_SENTINEL}\n\n"
+    "Headless. No clarifying questions."
+)
+
 ALLOWED_TOOLS = [
     # basic-memory (narrative recall)
     "mcp__basic_memory__search_notes",
@@ -64,9 +78,17 @@ def _build_conversation_summary(messages: list, limit: int = 10) -> str:
     return "\n".join(lines)
 
 
-async def search_memories(session_id: str) -> Optional[str]:
-    """Search basic-memory for content relevant to the current session."""
-    log.info("subconscious.started", session_id=session_id)
+async def search_memories(session_id: str, max_turns: int = 12) -> Optional[str]:
+    """Search basic-memory for content relevant to the current session.
+
+    Parameters
+    ----------
+    max_turns : int
+        Maximum agentic round-trips.  Use 2 for a fast first-message check
+        (one search + one calendar lookup), 12 (default) for deeper periodic runs.
+    """
+    quick = max_turns <= 2
+    log.info("subconscious.started", session_id=session_id, quick=quick)
 
     session = await get_session(session_id)
     if not session or not session.messages:
@@ -96,14 +118,15 @@ async def search_memories(session_id: str) -> Optional[str]:
             "WebFetch", "WebSearch", "NotebookEdit",
         ],
         permission_mode="bypassPermissions",
-        max_turns=12,
-        system_prompt=SUBCONSCIOUS_SYSTEM_PROMPT,
+        max_turns=max_turns,
+        system_prompt=SUBCONSCIOUS_QUICK_PROMPT if quick else SUBCONSCIOUS_SYSTEM_PROMPT,
     )
 
     thought: Optional[str] = None
 
-    log.info("subconscious.agent_starting", session_id=session_id)
-    async with claude_process_slot(timeout=90):
+    slot_timeout = 10 if quick else 90
+    log.info("subconscious.agent_starting", session_id=session_id, max_turns=max_turns)
+    async with claude_process_slot(timeout=slot_timeout):
         async with ClaudeSDKClient(options=options) as client:
             await client.query(prompt)
 

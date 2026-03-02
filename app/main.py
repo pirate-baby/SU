@@ -3,7 +3,6 @@ FastAPI application with Claude chat functionality and life management.
 """
 import asyncio
 import json
-import random as _random
 import uuid
 from typing import Any, Optional
 
@@ -987,13 +986,15 @@ async def stream_claude_response(websocket: WebSocket, session_id: str, user_mes
         log.warning("chat.ws_disconnected_during_stream", session_id=session_id)
 
 
-async def _collect_and_consume_memories(session_id: str) -> Optional[str]:
+async def _collect_and_consume_memories(session_id: str, session=None) -> Optional[str]:
     """Collect pending memory thoughts, mark them consumed, and return as a context string.
 
     Returns a formatted <context>...</context> string to prepend to the user message,
-    or None if there are no pending memories.
+    or None if there are no pending memories. Accepts an optional pre-fetched session
+    to avoid a redundant DB read.
     """
-    session = await get_session(session_id)
+    if session is None:
+        session = await get_session(session_id)
     if not session or not session.messages:
         return None
 
@@ -1006,58 +1007,12 @@ async def _collect_and_consume_memories(session_id: str) -> Optional[str]:
 
     log.info("memory.injecting", session_id=session_id, count=len(pending))
 
-    from app.session_manager import mark_memories_consumed
-    for m in pending:
-        if m.id is not None:
-            await mark_memories_consumed(m.id)
+    from app.session_manager import mark_memories_consumed_batch
+    ids = [m.id for m in pending if m.id is not None]
+    await mark_memories_consumed_batch(ids)
 
     log.info("memory.injected", session_id=session_id, count=len(pending))
     return context_prefix
-
-
-def _voice_filler_phrases() -> list[str]:
-    user = settings.user_name
-    return [
-        "Hmm, hang on, let me think.",
-        f"Sure thing {user}, let me noodle on that for a sec.",
-        "One moment, just pulling my thoughts together.",
-        "Let me think on that.",
-        "Give me a sec.",
-        "On it, one moment.",
-        f"Hang on {user}.",
-    ]
-
-
-async def _forward_filler_audio(tts, websocket: WebSocket, session_id: str):
-    """Forward filler TTS audio. Sends audio_end with filler=true so client doesn't treat it as final."""
-    try:
-        async for audio_b64 in tts.audio_chunks():
-            await websocket.send_json({
-                "type": "audio_chunk",
-                "audio": audio_b64,
-            })
-    except Exception:
-        log.exception("tts.filler_forward_error", session_id=session_id)
-    # Signal end of filler audio (not the real end)
-    await websocket.send_json({"type": "audio_end", "filler": True})
-
-
-async def _send_voice_filler(websocket: WebSocket, session_id: str):
-    """Send a quick spoken filler phrase via TTS so there's no awkward silence."""
-    phrase = _random.choice(_voice_filler_phrases())
-    if not settings.elevenlabs_api_key:
-        return
-    try:
-        from app.elevenlabs_tts import ElevenLabsTTS
-        tts = ElevenLabsTTS()
-        await tts.connect()
-        forwarder = asyncio.create_task(_forward_filler_audio(tts, websocket, session_id))
-        await tts.send_text(phrase)
-        await tts.flush()
-        await tts.close()
-        await forwarder
-    except Exception:
-        log.exception("voice_filler.error", session_id=session_id)
 
 
 async def handle_user_message(websocket: WebSocket, session_id: str, user_message: str, claude: ClaudeChat, voice_mode: bool = False):
@@ -1068,25 +1023,30 @@ async def handle_user_message(websocket: WebSocket, session_id: str, user_messag
         "content": user_message
     })
 
-    # For the very first user message, run the subconscious immediately (await)
-    # so any surfaced memories are ready before we start generating. For subsequent
-    # messages, fire it in the background on the usual interval.
+    # On the first message, await a quick subconscious run (max_turns=2) so
+    # memories are available for SU's opening response.  This blocks, but with
+    # only 2 turns + a 10s hard timeout it stays snappy.  If the timeout fires,
+    # inject a "still thinking" note so SU can respond naturally while the
+    # subconscious keeps running in the background.
     session = await get_session(session_id)
     user_messages = [m for m in (session.messages if session else []) if m.role == "user"]
     if len(user_messages) == 1:
-        if voice_mode:
-            # Send a spoken filler while memory search runs to avoid awkward silence
-            filler_task = asyncio.create_task(_send_voice_filler(websocket, session_id))
         await _ws_send(websocket, {"type": "status", "content": "...", "persist": True})
-        await on_first_message(session_id)
-        if voice_mode:
-            await filler_task
+        try:
+            await asyncio.wait_for(on_first_message(session_id), timeout=10.0)
+        except asyncio.TimeoutError:
+            log.warning("memory.first_message_timeout", session_id=session_id)
+            await save_message(
+                session_id, "memory",
+                "I need to think about this for a minute, hang on — "
+                "my memory search is still running.",
+            )
         await _ws_send(websocket, {"type": "status", "content": ""})
     else:
         asyncio.ensure_future(on_user_message(session_id))
 
     try:
-        context_prefix = await _collect_and_consume_memories(session_id)
+        context_prefix = await _collect_and_consume_memories(session_id, session=session)
         effective_message = (context_prefix + user_message) if context_prefix else user_message
         if voice_mode:
             effective_message = VOICE_MODE_INSTRUCTION + effective_message

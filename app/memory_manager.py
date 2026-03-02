@@ -57,14 +57,14 @@ def get_basic_memory_mcp_config() -> dict:
 # ---------------------------------------------------------------------------
 
 async def on_first_message(session_id: str) -> None:
-    """Await a subconscious run immediately before the first response.
+    """Quick subconscious run on the first message (fire-and-forget from main).
 
-    Called synchronously (not fire-and-forget) so that any surfaced memory
-    is available for injection before the agent starts generating.
+    Uses max_turns=2 for speed: one memory search + one calendar check, done.
+    Memories surface on the next turn rather than blocking the first response.
     """
     _session_counters[session_id] = 1
     log.info("memory.subconscious_immediate", session_id=session_id)
-    await _run_subconscious(session_id)
+    await _run_subconscious(session_id, max_turns=2)
 
 
 async def on_user_message(session_id: str) -> None:
@@ -134,11 +134,11 @@ async def on_session_end(session_id: str) -> None:
 # Internal runners (isolate agent errors from the main loop)
 # ---------------------------------------------------------------------------
 
-async def _run_subconscious(session_id: str) -> None:
+async def _run_subconscious(session_id: str, max_turns: int = 12) -> None:
     run_id = await daemon_registry.start_run("subconscious", session_id=session_id)
     try:
         from app.subconscious_agent import search_memories
-        await search_memories(session_id)
+        await search_memories(session_id, max_turns=max_turns)
         await daemon_registry.end_run(run_id, "subconscious", RunStatus.COMPLETED)
     except asyncio.CancelledError:
         await daemon_registry.end_run(run_id, "subconscious", RunStatus.FAILED, error="cancelled")

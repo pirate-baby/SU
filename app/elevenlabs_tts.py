@@ -42,7 +42,10 @@ class ElevenLabsTTS:
         self._ws = await websockets.connect(url, additional_headers=extra_headers)
 
         # Send BOS — a blank space with voice settings and generation config.
-        # Larger initial chunks reduce stuttering from tiny MP3 fragment decoding.
+        # Larger initial chunks prevent stuttering from tiny MP3 fragment decoding.
+        # The schedule ramps down: first chunk waits for 300 chars (big enough to
+        # decode smoothly), then subsequent chunks get progressively smaller for
+        # lower latency once the audio pipeline is warm.
         bos_message = {
             "text": " ",
             "voice_settings": {
@@ -51,7 +54,7 @@ class ElevenLabsTTS:
                 "speed": 1.0,
             },
             "generation_config": {
-                "chunk_length_schedule": [120, 160, 250, 290],
+                "chunk_length_schedule": [300, 250, 200, 150],
             },
         }
         await self._ws.send(json.dumps(bos_message))
