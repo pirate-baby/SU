@@ -296,13 +296,14 @@ EOF
 # (IMAP:1143, SMTP:1025) — no host networking or socat forwarding needed.
 #
 # First-time setup:
-#   docker compose exec proton-bridge /setup.sh
-#   docker compose restart proton-bridge
+#   docker compose stop proton-bridge
+#   docker compose run --rm proton-bridge /setup.sh
+#   docker compose start proton-bridge
 #
 # Verify:
 #   docker compose exec proton-bridge /check.sh --emails
 echo "Proton Bridge runs as a Docker sidecar (proton-bridge container on claude-network)"
-echo "  First-time setup: docker compose exec proton-bridge /setup.sh"
+echo "  First-time setup: docker compose stop proton-bridge && docker compose run --rm proton-bridge /setup.sh && docker compose start proton-bridge"
 echo "  Verify: docker compose exec proton-bridge /check.sh --emails"
 
 # ---------------------------------------------------------------------------

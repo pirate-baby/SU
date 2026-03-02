@@ -93,14 +93,15 @@ echo "=== 5/7  Proton Bridge ==="
 # in docker-compose.yml). No host-side installation needed.
 #
 # First-time setup after `docker compose up -d`:
-#   docker compose exec proton-bridge /setup.sh
-#   (log in, then restart: docker compose restart proton-bridge)
+#   docker compose stop proton-bridge
+#   docker compose run --rm proton-bridge /setup.sh
+#   docker compose start proton-bridge
 #
 # Verify connectivity:
 #   docker compose exec proton-bridge /check.sh
 #   docker compose exec proton-bridge /check.sh --emails  (with creds)
 echo "Proton Bridge runs as a Docker sidecar — no host install needed."
-echo "  After startup: docker compose exec proton-bridge /setup.sh"
+echo "  After startup: docker compose run --rm proton-bridge /setup.sh"
 echo ""
 
 echo "=== 6/7  Git config ==="
@@ -126,6 +127,7 @@ echo "    1. sudo tailscale up"
 echo "    2. cp .env.example .env && vim .env"
 echo "    3. bash startup.sh"
 echo "    4. Log in to Proton Bridge (if using ProtonMail):"
-echo "         docker compose exec proton-bridge /setup.sh"
-echo "         docker compose restart proton-bridge"
+echo "         docker compose stop proton-bridge"
+echo "         docker compose run --rm proton-bridge /setup.sh"
+echo "         docker compose start proton-bridge"
 echo "========================================="

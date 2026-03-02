@@ -10,8 +10,9 @@
 # to the container — no cross-network hops, no host firewall issues.
 #
 # First-time setup (after `docker compose up -d`):
-#   docker compose exec proton-bridge /setup.sh
-#   (follow prompts to log in, then Ctrl-C / exit)
+#   docker compose stop proton-bridge
+#   docker compose run --rm proton-bridge /setup.sh
+#   docker compose start proton-bridge
 #
 # Verify:
 #   docker compose exec proton-bridge /check.sh
