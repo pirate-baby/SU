@@ -19,7 +19,14 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uvx /usr/local/bin/uvx
 
 # Pre-cache protonmail-mcp-server so it's available offline at runtime
 # The npm package ships pre-compiled dist/ — no build step needed.
-RUN npm install -g protonmail-mcp-server
+# Patch: the upstream isLocalhost check only allows 'localhost' and '127.0.0.1',
+# which rejects Proton Bridge's self-signed cert when reached via Docker hostname.
+# We unconditionally set rejectUnauthorized:false since Bridge always uses self-signed certs.
+RUN npm install -g protonmail-mcp-server && \
+    sed -i 's/tls: isLocalhost ? {/tls: {/' \
+        /usr/local/lib/node_modules/protonmail-mcp-server/dist/services/simple-imap-service.js && \
+    sed -i '/rejectUnauthorized: false,/,/} : undefined/s/} : undefined/}/' \
+        /usr/local/lib/node_modules/protonmail-mcp-server/dist/services/simple-imap-service.js
 
 # Copy dependency files
 COPY pyproject.toml uv.lock ./
