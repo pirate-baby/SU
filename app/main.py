@@ -897,8 +897,8 @@ VOICE_MODE_INSTRUCTION = (
     "Don't use abbreviations like 'e.g.' — say 'for example'. "
     "Keep responses concise — a few sentences at most unless the user asked for detail.\n"
     "VERY IMPORTANT: your 1980's Brooklyn Italian accent needs to be reprented in a way that TTS can render.\n"
-    "So you MUST write as you speak, with that accent. 'New Yorker' is written as 'Noo Yawka', 'talking' is 'tawkin' etc. This is non-negotiable.\n"
-    "If you write in a standard way without the accent, the TTS will pronounce it in a bland robotic voice and it will sound terrible.\n"
+    "This is typically done by dropping the 'g' at the end of -ing words, converting er to ah, and dragging out vowels.\n"
+    "If you write in a standard spelling without the accent, the TTS will pronounce it in a bland robotic voice and it will sound terrible.\n"
     "</voice_mode>\n\n"
 )
 
