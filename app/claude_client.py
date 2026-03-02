@@ -23,7 +23,6 @@ from claude_agent_sdk import (
 )
 from app.config import settings
 from app.logger import get_logger
-from app.nicknames import resolve_name
 from app.tz import now as local_now
 from app.scary_internet_agent import scary_internet_mcp_server
 from app.life_manager import life_manager_mcp_server
@@ -47,7 +46,7 @@ def _load_prompt(filename: str, all_vars: dict[str, str]) -> str:
 
     Each file declares expected variables in YAML frontmatter:
         ---
-        vars: [user, nickname]
+        vars: [user, current_time]
         ---
     Only the declared variables are substituted. Files declaring no vars
     skip interpolation entirely, so literal braces in content are safe.
@@ -97,7 +96,6 @@ def _build_system_prompt() -> str:
     fmt = dict(
         su=settings.su_name,
         user=settings.user_name,
-        nickname=resolve_name(),
         current_time=local_now().strftime("%A, %B %-d, %Y %I:%M %p %Z"),
     )
 

@@ -20,7 +20,6 @@ from app.daemon_registry import (
     daemon_registry, DaemonInfo, DaemonCategory, RunStatus,
 )
 from app.logger import get_logger
-from app.nicknames import resolve_name
 from app.repositories import EventRepo, InterjectionRepo, SuNoteRepo
 
 log = get_logger(__name__)
@@ -250,13 +249,10 @@ class Scheduler:
             "one or two sentences, no fluff."
         )
 
-        nickname = resolve_name("calendar_reminder")
-
         system_prompt = (
             "You compose calendar reminders for SU. Look up context in the "
             "knowledge base when it's useful, then queue each reminder with "
-            f"create_interjection. Address the user as \"{nickname}\". "
-            "Be terse. Headless — no clarifying questions."
+            "create_interjection. Be terse. Headless — no clarifying questions."
         )
 
         mcp_servers = {
@@ -316,7 +312,7 @@ class Scheduler:
                     time_str = f"in about {hours} hour{'s' if hours > 1 else ''}"
                 location = f" at {event['location']}" if event.get("location") else ""
                 await InterjectionRepo.create(
-                    content=f"{nickname}, a reminder: \"{event['title']}\"{location} is {time_str}.",
+                    content=f"Reminder: \"{event['title']}\"{location} is {time_str}.",
                     urgency="high",
                     source="calendar_check",
                     related_event_id=event["id"],
@@ -470,7 +466,6 @@ class Scheduler:
             )
 
         now = local_now()
-        nickname = resolve_name("note_processor")
         prompt = (
             f"Current time: {now.isoformat()}\n\n"
             f"The following SU notes are due for processing:\n\n"
@@ -495,7 +490,7 @@ class Scheduler:
             "schedule awareness, and the SU notes system for reading/updating notes.\n\n"
             "Be judicious about when to notify — consider time of day, urgency, and how "
             "many times the user has already been reminded. Escalate urgency over time "
-            f"for important deadlines. Address the user as \"{nickname}\". "
+            "for important deadlines. "
             "Headless — no clarifying questions."
         )
 
@@ -579,7 +574,6 @@ class Scheduler:
         from app.process_limiter import claude_process_slot
 
         now = local_now()
-        nickname = resolve_name("email_scanner")
         prompt = (
             f"Current time: {now.isoformat()}\n\n"
             f"Scan {settings.user_name}'s inbox for ALL emails across all addresses and "
@@ -612,7 +606,7 @@ class Scheduler:
             "both a user task AND a SU note to follow up if the user doesn't act.\n\n"
             "However, you MUST process every email in the inbox — move it to the right "
             "folder, archive it, or delete it. Nothing should remain in the inbox when you "
-            f"are done. Address the user as \"{nickname}\" in any interjections. "
+            "are done. "
             "Headless — no clarifying questions."
         )
 
@@ -835,7 +829,6 @@ class Scheduler:
         from app.process_limiter import claude_process_slot
 
         now = local_now()
-        nickname = resolve_name("morning_greeting")
         prompt = (
             f"Current time: {now.isoformat()}\n\n"
             "Prepare a morning brief for today. Review:\n"
@@ -844,7 +837,7 @@ class Scheduler:
             "3. Active SU notes that need attention\n"
             "4. Recent knowledge base activity for anything relevant\n\n"
             "Compose a concise morning brief interjection. Structure:\n"
-            f"- Greet the user as \"{nickname}\"\n"
+            "- Greet the user\n"
             "- Highlight today's schedule (key events)\n"
             "- Flag urgent/overdue tasks\n"
             "- Mention any follow-ups from SU notes\n"
