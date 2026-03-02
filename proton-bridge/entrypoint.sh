@@ -1,21 +1,33 @@
 #!/bin/bash
 # Entrypoint for the Proton Bridge sidecar container.
 #
+# Runs as root to fix volume permissions, then drops to the proton user.
+#
 # The pre-built bridge binary only listens on 127.0.0.1:{1143,1025}.
 # Other containers on the Docker network connect to this container's
-# network IP, so we need to expose those ports on 0.0.0.0.
+# network IP, so we need to expose those ports externally via socat.
 #
 # Strategy:
-#   1. Start bridge in the background (binds 127.0.0.1:1143/1025)
-#   2. Wait for bridge ports to open
-#   3. Start socat forwarders on the container's non-loopback IP
+#   1. Fix ownership on volume-mounted directories (may be root from first run)
+#   2. Start bridge as proton user in the background (binds 127.0.0.1:1143/1025)
+#   3. Wait for bridge ports to open
+#   4. Start socat forwarders on the container's non-loopback IP
 #      (eth0 IP:port → 127.0.0.1:port) so there's no port conflict
-#   4. Wait on the bridge process — if it exits, the container exits.
+#   5. Wait on the bridge process — if it exits, the container exits.
 
 set -e
 
-# Start bridge in the background
-/usr/bin/protonmail-bridge --noninteractive --log-level info &
+# Fix volume ownership — on first run Docker may create these as root
+chown -R proton:proton \
+    /home/proton/.config \
+    /home/proton/.gnupg \
+    /home/proton/.local \
+    /home/proton/.cache \
+    /home/proton/.password-store \
+    2>/dev/null || true
+
+# Start bridge as proton user in the background
+gosu proton /usr/bin/protonmail-bridge --noninteractive --log-level info &
 BRIDGE_PID=$!
 
 # Wait for bridge to start listening (up to 60s)

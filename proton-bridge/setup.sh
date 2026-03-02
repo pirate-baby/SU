@@ -29,4 +29,5 @@ echo ""
 echo "Starting Bridge CLI..."
 echo ""
 
-exec /usr/bin/protonmail-bridge --cli
+# Run as proton user (container runs as root, bridge state is owned by proton)
+exec gosu proton /usr/bin/protonmail-bridge --cli

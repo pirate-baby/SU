@@ -23,6 +23,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
     curl \
     gnupg \
+    gosu \
     pass \
     socat \
     ca-certificates \
@@ -31,6 +32,17 @@ RUN apt-get update && apt-get install -y \
 
 # Create dedicated user (bridge writes to $HOME)
 RUN useradd -m -s /bin/bash -u 1100 proton
+
+# Pre-create all directories that will be volume-mounted.
+# Docker named volumes inherit ownership from the image on first use,
+# so these must exist and be owned by proton BEFORE the volumes are mounted.
+RUN mkdir -p \
+        /home/proton/.config/protonmail \
+        /home/proton/.gnupg \
+        /home/proton/.local/share/protonmail \
+        /home/proton/.cache/protonmail \
+        /home/proton/.password-store \
+    && chown -R proton:proton /home/proton
 
 # Download and install latest Proton Bridge .deb from GitHub releases.
 # The install target is resolved dynamically so the image always gets the
@@ -48,6 +60,7 @@ COPY check.sh /check.sh
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /setup.sh /check.sh /entrypoint.sh
 
+# Switch to proton for build-time key generation (writes to ~/.gnupg, ~/.password-store)
 USER proton
 WORKDIR /home/proton
 
@@ -57,6 +70,10 @@ RUN gpg --batch --passphrase '' --quick-gen-key 'ProtonMailBridge' default defau
 # Initialize pass (password store) with the GPG key — bridge uses this on Linux
 RUN GPGID=$(gpg --list-keys --with-colons 'ProtonMailBridge' | awk -F: '/^pub/{print $5}') \
     && pass init "$GPGID"
+
+# Switch back to root for runtime — entrypoint fixes volume permissions
+# then drops to proton via gosu.
+USER root
 
 EXPOSE 1143 1025
 
