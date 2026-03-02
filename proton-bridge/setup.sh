@@ -26,8 +26,13 @@ echo "  list     — Verify your account is connected"
 echo "  info     — Show the Bridge mailbox password (for PROTONMAIL_PASSWORD in .env)"
 echo "  exit     — Done (then restart the container)"
 echo ""
+echo "Stopping running bridge instance..."
+killall protonmail-bridge 2>/dev/null || true
+sleep 2
+
 echo "Starting Bridge CLI..."
 echo ""
 
 # Run as proton user (container runs as root, bridge state is owned by proton)
+# After exiting, the container will need a restart to bring the daemon back.
 exec gosu proton /usr/bin/protonmail-bridge --cli
