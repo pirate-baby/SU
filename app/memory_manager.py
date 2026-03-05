@@ -43,15 +43,6 @@ _checkpoint_tasks: dict[str, asyncio.Task] = {}
 SUBCONSCIOUS_INTERVAL = 5  # trigger every N user messages
 
 
-def get_basic_memory_mcp_config() -> dict:
-    """Return MCP stdio server config for basic-memory."""
-    return {
-        "type": "stdio",
-        "command": "uvx",
-        "args": ["basic-memory", "mcp"],
-    }
-
-
 # ---------------------------------------------------------------------------
 # Public hooks called from main.py
 # ---------------------------------------------------------------------------

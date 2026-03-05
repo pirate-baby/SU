@@ -1,21 +1,26 @@
 """
-Agent registry: keeps ClaudeChat instances alive independent of WebSocket
-connections so that sessions survive disconnects and reconnects.
+Agent registry: manages per-session conversation state using pydantic-ai.
+
+Each session gets a SessionState that holds message history. The chat agent
+itself is a module-level singleton (defined in agents.py) — no subprocesses,
+no semaphores, just HTTP calls to the Anthropic API.
 """
 import asyncio
 import os
 import time
-from typing import Optional
+from typing import Any, AsyncGenerator
 
-from fastapi import WebSocket
+from pydantic_ai import Agent
+from pydantic_ai.messages import ModelMessage
+from pydantic_ai.agent import AgentStreamEvent
+from pydantic_ai._agent_graph import PartDeltaEvent, FunctionToolCallEvent, FunctionToolResultEvent
+from pydantic_ai.messages import TextPart
 
-from app.claude_client import ClaudeChat
 from app.config import settings
 from app.daemon_registry import (
     daemon_registry, DaemonInfo, DaemonCategory, RunStatus,
 )
 from app.logger import get_logger
-from app.process_limiter import _get_semaphore, _slot_holders, claude_process_slot
 from app.session_manager import get_session
 
 log = get_logger(__name__)
@@ -26,56 +31,166 @@ daemon_registry.register(DaemonInfo(
     display_name="Agent Cleanup",
     category=DaemonCategory.SYSTEM,
     interval_seconds=60,
-    description="Disconnects idle agents to free process slots",
+    description="Cleans up idle session state to free memory",
 ))
 
-# Live agents keyed by session_id
-_agents: dict[str, ClaudeChat] = {}
 
-# One lock per session to serialize message handling
-_agent_locks: dict[str, asyncio.Lock] = {}
+class SessionState:
+    """Tracks conversation state for one chat session."""
 
-# Last activity timestamp per agent (monotonic clock)
+    def __init__(self, session_id: str, agent: Agent):
+        self.session_id = session_id
+        self.agent = agent
+        self.message_history: list[ModelMessage] = []
+        self._lock = asyncio.Lock()
+
+    async def send_message(self, user_message: str) -> AsyncGenerator[dict[str, Any], None]:
+        """Send a message through the agent and yield structured events.
+
+        Yields dicts with type: text, tool_use, tool_result, error
+        matching the existing WebSocket protocol.
+        """
+        try:
+            async with self.agent.iter(user_message, message_history=self.message_history) as agent_run:
+                async for node in agent_run:
+                    # Process events from each node
+                    if hasattr(node, 'stream_event'):
+                        # ModelRequestNode or similar — we iterate the run
+                        pass
+
+            # After the run completes, extract the result
+            result = agent_run.result
+            if result:
+                # Update message history
+                self.message_history = result.all_messages()
+
+                # Yield the final text
+                output = result.output
+                if isinstance(output, str) and output:
+                    yield {"type": "text", "content": output}
+
+        except Exception as e:
+            log.exception("session.send_error", session_id=self.session_id, error=str(e))
+            yield {"type": "error", "content": f"Error communicating with Claude: {str(e)}"}
+
+    async def send_message_streaming(self, user_message: str) -> AsyncGenerator[dict[str, Any], None]:
+        """Send a message and stream back events in real-time.
+
+        Uses agent.run_stream() for streaming text deltas and tool events.
+        """
+        try:
+            async with self.agent.run_stream(
+                user_message,
+                message_history=self.message_history,
+            ) as stream:
+                # Stream text deltas
+                async for text_delta in stream.stream_text(delta=True):
+                    yield {"type": "text", "content": text_delta}
+
+                # After streaming completes, update history
+                result = stream.get()
+                self.message_history = result.all_messages()
+
+        except Exception as e:
+            log.exception("session.stream_error", session_id=self.session_id, error=str(e))
+            yield {"type": "error", "content": f"Error communicating with Claude: {str(e)}"}
+
+    async def send_message_with_tools(self, user_message: str) -> AsyncGenerator[dict[str, Any], None]:
+        """Send a message and yield all events including tool calls/results.
+
+        This is the primary method for chat — it yields:
+        - {"type": "text", "content": "..."} for text chunks
+        - {"type": "tool_use", "id": "...", "name": "...", "input": {...}} for tool calls
+        - {"type": "tool_result", "tool_use_id": "...", "content": "...", "is_error": bool}
+        - {"type": "error", "content": "..."} on failure
+        """
+        try:
+            async with self.agent.iter(
+                user_message,
+                message_history=self.message_history,
+            ) as agent_run:
+                async for node in agent_run:
+                    # Each node in the agent graph can be a model request,
+                    # tool call, or end node. We need to extract events.
+                    pass
+
+            # After the run, extract all events from the messages
+            result = agent_run.result
+            if result:
+                # Walk through new messages to yield events
+                new_messages = result.new_messages()
+                for msg in new_messages:
+                    for part in msg.parts:
+                        if hasattr(part, 'content') and isinstance(part, TextPart):
+                            yield {"type": "text", "content": part.content}
+                        elif hasattr(part, 'tool_name'):
+                            # ToolCallPart
+                            yield {
+                                "type": "tool_use",
+                                "id": getattr(part, 'tool_call_id', ''),
+                                "name": part.tool_name,
+                                "input": getattr(part, 'args', {}),
+                            }
+                        elif hasattr(part, 'tool_call_id') and hasattr(part, 'content'):
+                            # ToolReturnPart
+                            yield {
+                                "type": "tool_result",
+                                "tool_use_id": part.tool_call_id,
+                                "content": part.content if isinstance(part.content, str) else str(part.content),
+                                "is_error": False,
+                            }
+
+                self.message_history = result.all_messages()
+
+        except Exception as e:
+            log.exception("session.send_error", session_id=self.session_id, error=str(e))
+            yield {"type": "error", "content": f"Error communicating with Claude: {str(e)}"}
+
+
+# Live session states keyed by session_id
+_sessions: dict[str, SessionState] = {}
+
+# Last activity timestamp per session (monotonic clock)
 _last_activity: dict[str, float] = {}
 
-# How long (seconds) an idle agent stays alive before cleanup.
-# Keep low on constrained instances — each agent holds a process slot.
-AGENT_TTL_SECONDS = int(os.environ.get("AGENT_TTL_SECONDS", "600"))  # 10 minutes
+# How long (seconds) an idle session stays alive before cleanup.
+AGENT_TTL_SECONDS = int(os.environ.get("AGENT_TTL_SECONDS", "600"))
+
+# The chat agent singleton — created lazily on first use
+_chat_agent: Agent | None = None
 
 
-async def get_or_create_agent(session_id: str) -> ClaudeChat:
-    """Return an existing live agent or create and connect a new one."""
-    if session_id in _agents:
+def _get_chat_agent() -> Agent:
+    """Get or create the chat agent singleton."""
+    global _chat_agent
+    if _chat_agent is None:
+        from app.agents import build_chat_agent
+        _chat_agent = build_chat_agent()
+    return _chat_agent
+
+
+async def get_or_create_session(session_id: str) -> SessionState:
+    """Return an existing session state or create a new one."""
+    if session_id in _sessions:
         _last_activity[session_id] = time.monotonic()
-        log.info("registry.reuse_agent", session_id=session_id)
-        return _agents[session_id]
+        log.info("registry.reuse_session", session_id=session_id)
+        return _sessions[session_id]
 
-    # Acquire a process slot *before* spawning a new Claude subprocess.
-    sem = _get_semaphore()
-    await sem.acquire()
-    try:
-        oauth = settings.claude_code_oauth_token or None
-        claude = ClaudeChat(oauth_token=oauth)
-        await claude.connect()
-    except BaseException:
-        sem.release()
-        raise
+    agent = _get_chat_agent()
+    session_state = SessionState(session_id, agent)
 
-    # Slot stays held until release_agent() is called.
-    _slot_holders.append(f"session:{session_id[:8]}")
-    _agents[session_id] = claude
-    _agent_locks[session_id] = asyncio.Lock()
+    # Inject existing conversation history from the DB
+    await _inject_history(session_id, session_state)
+
+    _sessions[session_id] = session_state
     _last_activity[session_id] = time.monotonic()
 
-    # If there is existing conversation history, inject it so the agent has context
-    await _inject_history(session_id, claude)
-
-    log.info("registry.created_agent", session_id=session_id)
-    return claude
+    log.info("registry.created_session", session_id=session_id)
+    return session_state
 
 
-async def _inject_history(session_id: str, claude: ClaudeChat) -> None:
-    """Inject a conversation summary from the DB so a fresh agent has context."""
+async def _inject_history(session_id: str, session_state: SessionState) -> None:
+    """Inject conversation history from DB as a context message."""
     session = await get_session(session_id)
     if not session or not session.messages:
         return
@@ -84,11 +199,10 @@ async def _inject_history(session_id: str, claude: ClaudeChat) -> None:
     if not history_msgs:
         return
 
-    # Build a condensed replay of the conversation
+    # Build a condensed replay and send it as a context message
     lines: list[str] = []
     for m in history_msgs:
         tag = "User" if m.role == "user" else "Assistant"
-        # Truncate very long messages to keep the context reasonable
         content = m.content if len(m.content) <= 2000 else m.content[:2000] + "..."
         lines.append(f"[{tag}]: {content}")
 
@@ -101,45 +215,40 @@ async def _inject_history(session_id: str, claude: ClaudeChat) -> None:
     )
 
     log.info("registry.injecting_history", session_id=session_id, message_count=len(history_msgs))
-    # Send through the SDK so it enters the agent's internal history
-    async for _ in claude.send_message(context):
-        pass
+
+    # Run a silent context injection — the agent processes this but we don't
+    # yield events to the user
+    try:
+        result = await session_state.agent.run(
+            context,
+            message_history=session_state.message_history,
+        )
+        session_state.message_history = result.all_messages()
+    except Exception:
+        log.warning("registry.history_injection_failed", session_id=session_id)
 
 
 def get_lock(session_id: str) -> asyncio.Lock:
-    """Return the per-session lock (creating one if needed)."""
-    if session_id not in _agent_locks:
-        _agent_locks[session_id] = asyncio.Lock()
-    return _agent_locks[session_id]
+    """Return the per-session lock."""
+    if session_id in _sessions:
+        return _sessions[session_id]._lock
+    # Create a temporary lock for sessions not yet created
+    return asyncio.Lock()
 
 
 def touch(session_id: str) -> None:
-    """Update the last-activity timestamp for an agent."""
+    """Update the last-activity timestamp for a session."""
     _last_activity[session_id] = time.monotonic()
 
 
-async def release_agent(session_id: str) -> None:
-    """Explicitly destroy an agent (e.g. when a session ends)."""
-    claude = _agents.pop(session_id, None)
-    _agent_locks.pop(session_id, None)
+async def release_session(session_id: str) -> None:
+    """Explicitly destroy a session state (e.g. when a session ends)."""
+    _sessions.pop(session_id, None)
     _last_activity.pop(session_id, None)
-    if claude:
-        try:
-            # Shield the disconnect so any internal CancelledError from
-            # asyncio.wait_for does not propagate to the calling task.
-            await asyncio.shield(asyncio.wait_for(claude.disconnect(), timeout=10))
-        except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
-            log.warning("registry.disconnect_failed", session_id=session_id)
-        finally:
-            _get_semaphore().release()
-            try:
-                _slot_holders.remove(f"session:{session_id[:8]}")
-            except ValueError:
-                pass
-            log.info("registry.released_agent", session_id=session_id)
+    log.info("registry.released_session", session_id=session_id)
 
 
-# Set of session IDs with an active WebSocket connection (maintained by main.py).
+# Set of session IDs with an active WebSocket connection
 _active_ws: set[str] = set()
 
 
@@ -151,8 +260,8 @@ def mark_ws_disconnected(session_id: str) -> None:
     _active_ws.discard(session_id)
 
 
-async def cleanup_idle_agents() -> None:
-    """Background task: periodically disconnect agents that have been idle too long."""
+async def cleanup_idle_sessions() -> None:
+    """Background task: periodically clean up sessions that have been idle too long."""
     log.info("registry.cleanup_started", ttl_seconds=AGENT_TTL_SECONDS)
     while True:
         await asyncio.sleep(60)
@@ -165,7 +274,7 @@ async def cleanup_idle_agents() -> None:
             ]
             for sid in stale:
                 log.info("registry.cleanup_idle", session_id=sid)
-                await release_agent(sid)
+                await release_session(sid)
             await daemon_registry.end_run(run_id, "agent_cleanup", RunStatus.COMPLETED)
         except Exception as exc:
             await daemon_registry.end_run(run_id, "agent_cleanup", RunStatus.FAILED,

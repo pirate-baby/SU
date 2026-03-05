@@ -19,7 +19,6 @@ from typing import Any
 
 from app.database import DATABASE_PATH, get_db
 from app.logger import get_logger, _log_queue
-from app.process_limiter import get_slot_status
 
 log = get_logger(__name__)
 
@@ -31,7 +30,6 @@ THRESHOLDS = {
     "table_rows": {"warn": 100_000, "crit": 500_000},
     "disk_usage_pct": {"warn": 80, "crit": 95},
     "log_queue_pct": {"warn": 50, "crit": 90},
-    "process_slots_used_pct": {"warn": 66, "crit": 100},
 }
 
 
@@ -153,7 +151,7 @@ async def _db_metrics() -> dict[str, Any]:
 
 def _process_metrics() -> dict[str, Any]:
     """Collect current process memory and child process info."""
-    from app.agent_registry import _agents, _active_ws, _last_activity
+    from app.agent_registry import _sessions, _active_ws, _last_activity
     from app.scheduler import _reminded_event_ids
     from app.memory_manager import _session_counters, _pending_tasks, _rem_checkpoints, _checkpoint_tasks
 
@@ -169,7 +167,7 @@ def _process_metrics() -> dict[str, Any]:
 
     # In-memory structure sizes
     in_memory = {
-        "agent_registry": len(_agents),
+        "agent_registry": len(_sessions),
         "active_websockets": len(_active_ws),
         "agent_last_activity": len(_last_activity),
         "reminded_event_ids": len(_reminded_event_ids),
@@ -179,16 +177,11 @@ def _process_metrics() -> dict[str, Any]:
         "checkpoint_tasks": len(_checkpoint_tasks),
     }
 
-    # Process limiter
-    slots = get_slot_status()
-    slot_pct = (slots["used_slots"] / slots["max_slots"] * 100) if slots["max_slots"] > 0 else 0
-
     return {
-        "status": _status(slot_pct, "process_slots_used_pct"),
+        "status": "green",
         "rss_bytes": rss_bytes,
         "rss_mb": round(rss_bytes / (1024 * 1024), 1),
         "gc_counts": {"gen0": gc_counts[0], "gen1": gc_counts[1], "gen2": gc_counts[2]},
-        "process_limiter": slots,
         "in_memory_structures": in_memory,
     }
 

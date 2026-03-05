@@ -495,21 +495,7 @@
         function renderSidebar() {
             if (!daemonData) return;
 
-            const limiter = daemonData.process_limiter;
-            const pct = limiter.max_slots > 0 ? (limiter.used_slots / limiter.max_slots * 100) : 0;
-            const fillClass = pct >= 100 ? 'full' : pct >= 66 ? 'high' : '';
-
             let html = '';
-
-            // Process limiter card
-            html += `<div class="slot-card">
-                <div class="slot-header">Process Slots</div>
-                <div class="slot-bar"><div class="slot-bar-fill ${fillClass}" style="width:${pct}%"></div></div>
-                <div class="slot-info">${limiter.used_slots} / ${limiter.max_slots} used</div>`;
-            if (limiter.holders.length > 0) {
-                html += `<div class="slot-holders">${limiter.holders.map(escapeHtml).join(', ')}</div>`;
-            }
-            html += '</div>';
 
             // Group daemons by category
             const groups = {};

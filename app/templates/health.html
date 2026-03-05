@@ -376,9 +376,6 @@
             html += sectionStart('process', 'Process & Memory', proc.status);
             html += '<div class="metrics-grid">';
             html += metricCard('RSS (Python)', proc.rss_mb + ' MB', proc.rss_mb > 500 ? 'yellow' : '');
-            const pl = proc.process_limiter;
-            html += metricCard('Process Slots', pl.used_slots + ' / ' + pl.max_slots, proc.status,
-                pl.holders.length ? pl.holders.join(', ') : 'none active');
             html += metricCard('GC Gen0', fmtNum(proc.gc_counts.gen0), '');
             html += '</div>';
 
@@ -575,7 +572,7 @@
                 { label: 'Message Rows', extract: d => d.database?.tables?.messages },
                 { label: 'Daemon Run Rows', extract: d => d.database?.tables?.daemon_runs },
                 { label: 'RSS (MB)', extract: d => d.process?.rss_mb },
-                { label: 'Process Slots Used', extract: d => d.process?.process_limiter?.used_slots },
+                { label: 'Active Sessions', extract: d => d.process?.in_memory_structures?.agent_registry },
                 { label: 'Log Queue %', extract: d => d.log_pipeline?.queue_pct },
                 { label: 'Logs / Hour', extract: d => d.log_pipeline?.logs_last_hour },
             ];

@@ -1,6 +1,6 @@
 """Tier 3: WebSocket chat tests.
 
-These tests mock ClaudeChat to avoid hitting the real Claude API while
+These tests mock SessionState to avoid hitting the real Claude API while
 verifying the full WebSocket protocol (connect, history, message exchange,
 error handling, disconnect).
 
@@ -16,28 +16,7 @@ import pytest_asyncio
 
 from app.database import init_database
 from app.session_manager import create_session, save_message
-from tests.conftest import MockClaudeChat
-
-
-def _make_sync_test_client():
-    """Build a starlette-compatible test client by working around httpx version mismatch."""
-    from app.main import app
-    from contextlib import asynccontextmanager
-    from httpx import ASGITransport
-
-    @asynccontextmanager
-    async def test_lifespan(a):
-        yield
-
-    app.router.lifespan_context = test_lifespan
-
-    # Use httpx Client with ASGITransport directly — supports websocket_connect
-    # via starlette's _ASGIAdapter
-    import httpx
-
-    transport = ASGITransport(app=app)
-    client = httpx.Client(transport=transport, base_url="http://test")
-    return client, app
+from tests.conftest import MockSessionState
 
 
 class TestWebSocketConnection:
@@ -45,24 +24,7 @@ class TestWebSocketConnection:
 
     async def test_invalid_session_receives_error(self):
         """Connecting to a non-existent session returns an error message."""
-        mock = MockClaudeChat()
-
-        async def fake_get_or_create(session_id):
-            return mock
-
-        with patch("app.main.get_or_create_agent", side_effect=fake_get_or_create):
-            with patch("app.main.on_user_message", new_callable=AsyncMock):
-                from app.main import app
-                from httpx import ASGITransport, AsyncClient
-
-                transport = ASGITransport(app=app)
-                async with AsyncClient(transport=transport, base_url="http://test") as client:
-                    # We can't do WebSocket over httpx AsyncClient directly.
-                    # Instead, test the WS handler logic by verifying the HTTP-level behavior.
-                    # The WS endpoint will reject invalid sessions.
-                    pass
-
-        # Test the session validation logic directly instead
+        # Test the session validation logic directly
         from app.session_manager import session_exists
         assert await session_exists("nonexistent-session") is False
 
@@ -118,12 +80,12 @@ class TestWebSocketConnection:
 
 
 class TestStreamClaudeResponse:
-    """Test the stream_claude_response function with mocked Claude."""
+    """Test the stream_claude_response function with mocked SessionState."""
 
     async def test_streams_text_response(self):
         """Verify text chunks are forwarded correctly over WS."""
         sid = await create_session()
-        mock_claude = MockClaudeChat(responses=[
+        mock_session = MockSessionState(responses=[
             {"type": "text", "content": "Hello "},
             {"type": "text", "content": "world!"},
         ])
@@ -136,7 +98,7 @@ class TestStreamClaudeResponse:
             async def send_json(self, data):
                 ws_messages.append(data)
 
-        await stream_claude_response(FakeWebSocket(), sid, "hi", mock_claude)
+        await stream_claude_response(FakeWebSocket(), sid, "hi", mock_session)
 
         types = [m["type"] for m in ws_messages]
         assert types[0] == "assistant_start"
@@ -150,7 +112,7 @@ class TestStreamClaudeResponse:
     async def test_streams_tool_use_events(self):
         """Verify tool_use and tool_result events are forwarded."""
         sid = await create_session()
-        mock_claude = MockClaudeChat(responses=[
+        mock_session = MockSessionState(responses=[
             {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "ls"}},
             {"type": "tool_result", "tool_use_id": "t1", "content": "file.txt", "is_error": False},
             {"type": "text", "content": "Done."},
@@ -164,7 +126,7 @@ class TestStreamClaudeResponse:
             async def send_json(self, data):
                 ws_messages.append(data)
 
-        await stream_claude_response(FakeWebSocket(), sid, "list files", mock_claude)
+        await stream_claude_response(FakeWebSocket(), sid, "list files", mock_session)
 
         tool_uses = [m for m in ws_messages if m["type"] == "tool_use"]
         assert len(tool_uses) == 1
@@ -177,9 +139,9 @@ class TestStreamClaudeResponse:
         assert tool_results[0]["is_error"] is False
 
     async def test_streams_error_events(self):
-        """Verify error events from Claude are forwarded."""
+        """Verify error events from the agent are forwarded."""
         sid = await create_session()
-        mock_claude = MockClaudeChat(responses=[
+        mock_session = MockSessionState(responses=[
             {"type": "error", "content": "Something went wrong"},
         ])
 
@@ -191,7 +153,7 @@ class TestStreamClaudeResponse:
             async def send_json(self, data):
                 ws_messages.append(data)
 
-        await stream_claude_response(FakeWebSocket(), sid, "test", mock_claude)
+        await stream_claude_response(FakeWebSocket(), sid, "test", mock_session)
 
         errors = [m for m in ws_messages if m["type"] == "error"]
         assert len(errors) == 1
@@ -200,7 +162,7 @@ class TestStreamClaudeResponse:
     async def test_saves_assistant_response_to_db(self):
         """Verify the full response is saved to the database."""
         sid = await create_session()
-        mock_claude = MockClaudeChat(responses=[
+        mock_session = MockSessionState(responses=[
             {"type": "text", "content": "Full response text"},
         ])
 
@@ -211,7 +173,7 @@ class TestStreamClaudeResponse:
             async def send_json(self, data):
                 pass
 
-        await stream_claude_response(FakeWebSocket(), sid, "test", mock_claude)
+        await stream_claude_response(FakeWebSocket(), sid, "test", mock_session)
 
         session = await get_session(sid)
         assistant_msgs = [m for m in session.messages if m.role == "assistant"]
@@ -225,7 +187,7 @@ class TestHandleUserMessage:
     async def test_saves_user_message_and_streams_response(self):
         """Verify user message is saved and response is streamed."""
         sid = await create_session()
-        mock_claude = MockClaudeChat(responses=[
+        mock_session = MockSessionState(responses=[
             {"type": "text", "content": "Response"},
         ])
 
@@ -240,7 +202,7 @@ class TestHandleUserMessage:
 
         with patch("app.main.on_user_message", new_callable=AsyncMock):
             with patch("app.main._inject_pending_memories", new_callable=AsyncMock):
-                await handle_user_message(FakeWebSocket(), sid, "Hello", mock_claude)
+                await handle_user_message(FakeWebSocket(), sid, "Hello", mock_session)
 
         # Check user message echo
         user_echoes = [m for m in ws_messages if m["type"] == "user_message"]
@@ -252,13 +214,15 @@ class TestHandleUserMessage:
         assert any(m.role == "user" and m.content == "Hello" for m in session.messages)
         assert any(m.role == "assistant" and m.content == "Response" for m in session.messages)
 
-    async def test_handles_claude_exception_gracefully(self):
-        """If Claude throws, an error message is sent to the client."""
+    async def test_handles_exception_gracefully(self):
+        """If the agent throws, an error message is sent to the client."""
         sid = await create_session()
 
-        class ErrorClaudeChat:
-            async def send_message(self, message):
-                raise RuntimeError("Claude crashed")
+        class ErrorSessionState:
+            _lock = asyncio.Lock()
+
+            async def send_message_with_tools(self, message):
+                raise RuntimeError("Agent crashed")
                 yield  # noqa: unreachable — makes this an async generator
 
         from app.main import handle_user_message
@@ -270,8 +234,8 @@ class TestHandleUserMessage:
                 ws_messages.append(data)
 
         with patch("app.main.on_user_message", new_callable=AsyncMock):
-            with patch("app.main._inject_pending_memories", side_effect=RuntimeError("Claude crashed")):
-                await handle_user_message(FakeWebSocket(), sid, "Hello", ErrorClaudeChat())
+            with patch("app.main._inject_pending_memories", side_effect=RuntimeError("Agent crashed")):
+                await handle_user_message(FakeWebSocket(), sid, "Hello", ErrorSessionState())
 
         errors = [m for m in ws_messages if m["type"] == "error"]
         assert len(errors) == 1

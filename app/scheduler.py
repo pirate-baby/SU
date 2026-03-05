@@ -219,16 +219,7 @@ class Scheduler:
         now: datetime,
     ) -> None:
         """Spawn a subagent to compose natural-language reminders for upcoming events."""
-        from claude_agent_sdk import (
-            ClaudeAgentOptions,
-            ClaudeSDKClient,
-            AssistantMessage,
-            ResultMessage,
-            TextBlock,
-        )
-        from app.memory_manager import get_basic_memory_mcp_config
-        from app.life_manager import life_manager_mcp_server
-        from app.process_limiter import claude_process_slot
+        from app.agents import build_calendar_agent
 
         # Build a summary of the events needing reminders
         event_summaries: list[str] = []
@@ -261,51 +252,9 @@ class Scheduler:
             "one or two sentences, no fluff."
         )
 
-        system_prompt = (
-            "You compose calendar reminders for SU. Look up context in the "
-            "knowledge base when it's useful, then queue each reminder with "
-            "create_interjection. Be terse. Headless — no clarifying questions."
-        )
-
-        mcp_servers = {
-            "basic_memory": get_basic_memory_mcp_config(),
-            "life_manager": life_manager_mcp_server,
-        }
-        allowed = [
-            "mcp__basic_memory__search_notes",
-            "mcp__basic_memory__read_note",
-            "mcp__life_manager__create_interjection",
-            "mcp__life_manager__list_tasks",
-        ]
-
-        if settings.telegram_bot_token:
-            from app.telegram_messenger import telegram_messenger_mcp_server
-            mcp_servers["telegram_messenger"] = telegram_messenger_mcp_server
-            allowed.append("mcp__telegram_messenger__send_telegram_message")
-
-        options = ClaudeAgentOptions(
-            mcp_servers=mcp_servers,
-            allowed_tools=allowed,
-            disallowed_tools=[
-                "Task", "Bash", "Glob", "Grep", "Read", "Edit", "Write",
-                "WebFetch", "WebSearch", "NotebookEdit",
-            ],
-            permission_mode="bypassPermissions",
-            max_turns=10,
-            system_prompt=system_prompt,
-        )
-
         try:
-            async with claude_process_slot(timeout=90, name="calendar_check"), ClaudeSDKClient(options=options) as client:
-                await client.query(prompt)
-                async for message in client.receive_response():
-                    if isinstance(message, ResultMessage) and message.is_error:
-                        log.warning(
-                            "scheduler.calendar_agent_error",
-                            result=message.result or "unknown",
-                        )
-                        return
-
+            agent = build_calendar_agent()
+            result = await agent.run(prompt)
             log.info("scheduler.calendar_agent_completed", event_count=len(events))
         except Exception:
             log.exception("scheduler.calendar_agent_failed")
@@ -445,15 +394,7 @@ class Scheduler:
 
     async def _run_note_processor_agent(self, notes: list[dict[str, Any]]) -> None:
         """Spawn a subagent to decide what to do with due SU notes."""
-        from claude_agent_sdk import (
-            ClaudeAgentOptions,
-            ClaudeSDKClient,
-            ResultMessage,
-        )
-        from app.memory_manager import get_basic_memory_mcp_config
-        from app.life_manager import life_manager_mcp_server
-        from app.su_notes_manager import su_notes_mcp_server
-        from app.process_limiter import claude_process_slot
+        from app.agents import build_note_processor_agent
 
         # Build a summary of notes needing attention
         note_summaries: list[str] = []
@@ -494,64 +435,9 @@ class Scheduler:
             "Don't notify about things the user has already handled."
         )
 
-        system_prompt = (
-            f"You are {settings.su_name}'s note processor daemon. You review SU's internal "
-            "notes-to-self and take action. You can create interjections to notify the user, "
-            "snooze notes for later, update notes with context, or complete them. "
-            "You have access to the knowledge base for context, the task/event list for "
-            "schedule awareness, and the SU notes system for reading/updating notes.\n\n"
-            "Be judicious about when to notify — consider time of day, urgency, and how "
-            "many times the user has already been reminded. Escalate urgency over time "
-            "for important deadlines. "
-            "Headless — no clarifying questions."
-        )
-
-        mcp_servers = {
-            "basic_memory": get_basic_memory_mcp_config(),
-            "life_manager": life_manager_mcp_server,
-            "su_notes_manager": su_notes_mcp_server,
-        }
-        allowed = [
-            "mcp__basic_memory__search_notes",
-            "mcp__basic_memory__read_note",
-            "mcp__life_manager__create_interjection",
-            "mcp__life_manager__list_interjections",
-            "mcp__life_manager__list_tasks",
-            "mcp__life_manager__list_events",
-            "mcp__su_notes_manager__get_su_note",
-            "mcp__su_notes_manager__update_su_note",
-            "mcp__su_notes_manager__complete_su_note",
-            "mcp__su_notes_manager__create_su_note",
-        ]
-
-        if settings.telegram_bot_token:
-            from app.telegram_messenger import telegram_messenger_mcp_server
-            mcp_servers["telegram_messenger"] = telegram_messenger_mcp_server
-            allowed.append("mcp__telegram_messenger__send_telegram_message")
-
-        options = ClaudeAgentOptions(
-            mcp_servers=mcp_servers,
-            allowed_tools=allowed,
-            disallowed_tools=[
-                "Task", "Bash", "Glob", "Grep", "Read", "Edit", "Write",
-                "WebFetch", "WebSearch", "NotebookEdit",
-            ],
-            permission_mode="bypassPermissions",
-            max_turns=20,
-            system_prompt=system_prompt,
-        )
-
         try:
-            async with claude_process_slot(timeout=120, name="note_processor"), ClaudeSDKClient(options=options) as client:
-                await client.query(prompt)
-                async for message in client.receive_response():
-                    if isinstance(message, ResultMessage) and message.is_error:
-                        log.warning(
-                            "scheduler.note_processor_error",
-                            result=message.result or "unknown",
-                        )
-                        return
-
+            agent = build_note_processor_agent()
+            result = await agent.run(prompt)
             log.info("scheduler.note_processor_completed", note_count=len(notes))
         except Exception:
             log.exception("scheduler.note_processor_failed")
@@ -570,20 +456,7 @@ class Scheduler:
 
         Returns a metadata dict with scan metrics for the daemon run record.
         """
-        from claude_agent_sdk import (
-            AssistantMessage,
-            ClaudeAgentOptions,
-            ClaudeSDKClient,
-            ResultMessage,
-            SystemMessage,
-            ToolResultBlock,
-            ToolUseBlock,
-            UserMessage,
-        )
-        from app.memory_manager import get_basic_memory_mcp_config
-        from app.life_manager import life_manager_mcp_server
-        from app.su_notes_manager import su_notes_mcp_server
-        from app.process_limiter import claude_process_slot
+        from app.agents import build_email_scanner_agent
 
         now = local_now()
         prompt = (
@@ -619,204 +492,13 @@ class Scheduler:
             "Store the email subject and sender in context_json on any SU notes you create."
         )
 
-        system_prompt = (
-            f"You are {settings.su_name}'s email scanner daemon. You periodically review "
-            f"{settings.user_name}'s inbox and take proactive action. You can create tasks, "
-            "calendar events, and SU notes. You have access to the email system, knowledge "
-            "base, and task/event lists.\n\n"
-            "Be selective about creating tasks — don't create noise. Only create tasks/notes "
-            "for emails that genuinely need attention. For urgent items with deadlines, create "
-            "both a user task AND a SU note to follow up if the user doesn't act.\n\n"
-            "However, you MUST process every email in the inbox — move it to the right "
-            "folder, archive it, or delete it. Nothing should remain in the inbox when you "
-            "are done. "
-            "Headless — no clarifying questions."
-        )
-
-        protonmail_mcp = {
-            "type": "stdio",
-            "command": "protonmail-mcp-server",
-            "args": [],
-            "env": {
-                "PROTONMAIL_USERNAME": settings.protonmail_username,
-                "PROTONMAIL_PASSWORD": settings.protonmail_password,
-                "PROTONMAIL_SMTP_HOST": settings.protonmail_smtp_host,
-                "PROTONMAIL_SMTP_PORT": str(settings.protonmail_smtp_port),
-                "PROTONMAIL_IMAP_HOST": settings.protonmail_imap_host,
-                "PROTONMAIL_IMAP_PORT": str(settings.protonmail_imap_port),
-            },
-        }
-
-        from app.unsubscribe_manager import unsubscribe_manager_mcp_server
-
-        mcp_servers = {
-            "basic_memory": get_basic_memory_mcp_config(),
-            "life_manager": life_manager_mcp_server,
-            "su_notes_manager": su_notes_mcp_server,
-            "unsubscribe_manager": unsubscribe_manager_mcp_server,
-            "protonmail": protonmail_mcp,
-        }
-        allowed = [
-            "mcp__protonmail__get_emails",
-            "mcp__protonmail__get_email_by_id",
-            "mcp__protonmail__search_emails",
-            "mcp__protonmail__move_email",
-            "mcp__protonmail__delete_email",
-            "mcp__protonmail__mark_email_read",
-            "mcp__protonmail__get_folders",
-            "mcp__protonmail__create_folder",
-            "mcp__basic_memory__search_notes",
-            "mcp__basic_memory__read_note",
-            "mcp__life_manager__create_task",
-            "mcp__life_manager__list_tasks",
-            "mcp__life_manager__create_event",
-            "mcp__life_manager__list_events",
-            "mcp__life_manager__create_interjection",
-            "mcp__su_notes_manager__create_su_note",
-            "mcp__su_notes_manager__list_su_notes",
-            "mcp__su_notes_manager__update_su_note",
-            "mcp__unsubscribe_manager__check_unsubscribed",
-        ]
-
-        if settings.telegram_bot_token:
-            from app.telegram_messenger import telegram_messenger_mcp_server
-            mcp_servers["telegram_messenger"] = telegram_messenger_mcp_server
-            allowed.append("mcp__telegram_messenger__send_telegram_message")
-
-        options = ClaudeAgentOptions(
-            mcp_servers=mcp_servers,
-            allowed_tools=allowed,
-            disallowed_tools=[
-                "Task", "Bash", "Glob", "Grep", "Read", "Edit", "Write",
-                "WebFetch", "WebSearch", "NotebookEdit",
-            ],
-            permission_mode="bypassPermissions",
-            max_turns=30,
-            system_prompt=system_prompt,
-        )
-
-        # Counters for observability
-        emails_found = 0
-        emails_moved = 0
-        emails_deleted = 0
-        tasks_created = 0
-        notes_created = 0
-        tool_errors = 0
-        tool_calls: dict[str, int] = {}
-        # Map tool_use_id → tool_name so we can label results
-        pending_tool_ids: dict[str, str] = {}
-
         try:
-            async with claude_process_slot(timeout=180, name="email_scanner"), ClaudeSDKClient(options=options) as client:
-                await client.query(prompt)
-                async for message in client.receive_response():
-                    if isinstance(message, SystemMessage):
-                        if message.subtype == "init":
-                            for srv in message.data.get("mcp_servers", []):
-                                name = srv.get("name", "unknown")
-                                status = srv.get("status", "unknown")
-                                if status != "connected":
-                                    log.error(
-                                        "scheduler.email_scanner_mcp_failed",
-                                        server_name=name,
-                                        server_status=status,
-                                    )
-                                else:
-                                    log.debug(
-                                        "scheduler.email_scanner_mcp_connected",
-                                        server_name=name,
-                                    )
-
-                    elif isinstance(message, AssistantMessage):
-                        for block in message.content:
-                            if isinstance(block, ToolUseBlock):
-                                tool_calls[block.name] = tool_calls.get(block.name, 0) + 1
-                                pending_tool_ids[block.id] = block.name
-                                log.debug(
-                                    "scheduler.email_scanner_tool_use",
-                                    tool=block.name,
-                                    input=str(block.input)[:300],
-                                )
-
-                    elif isinstance(message, UserMessage):
-                        content = message.content
-                        if isinstance(content, list):
-                            for block in content:
-                                if isinstance(block, ToolResultBlock):
-                                    tool_name = pending_tool_ids.pop(block.tool_use_id, "unknown")
-                                    if block.is_error:
-                                        tool_errors += 1
-                                        log.warning(
-                                            "scheduler.email_scanner_tool_error",
-                                            tool=tool_name,
-                                            tool_use_id=block.tool_use_id,
-                                            content=str(block.content)[:500],
-                                        )
-                                    elif tool_name.startswith("mcp__protonmail__"):
-                                        # Log protonmail results so we can diagnose
-                                        # silent empty returns from the MCP server.
-                                        log.info(
-                                            "scheduler.email_scanner_tool_result",
-                                            tool=tool_name,
-                                            content=str(block.content)[:1000],
-                                        )
-
-                    elif isinstance(message, ResultMessage):
-                        if message.is_error:
-                            log.warning(
-                                "scheduler.email_scanner_error",
-                                result=message.result or "unknown",
-                            )
-                            return {
-                                "emails_found": emails_found,
-                                "tool_errors": tool_errors,
-                                "error": message.result or "unknown",
-                            }
-
-            # Derive counts from tool calls
-            emails_found = tool_calls.get("mcp__protonmail__get_email_by_id", 0)
-            emails_moved = tool_calls.get("mcp__protonmail__move_email", 0)
-            emails_deleted = tool_calls.get("mcp__protonmail__delete_email", 0)
-            tasks_created = tool_calls.get("mcp__life_manager__create_task", 0)
-            notes_created = tool_calls.get("mcp__su_notes_manager__create_su_note", 0)
-
-            # Warn if get_emails was called but found nothing — likely an
-            # IMAP connection or sync issue, not a genuinely empty inbox.
-            get_emails_calls = tool_calls.get("mcp__protonmail__get_emails", 0)
-            if get_emails_calls > 0 and emails_found == 0:
-                log.warning(
-                    "scheduler.email_scanner_empty_inbox",
-                    get_emails_calls=get_emails_calls,
-                    msg="get_emails returned 0 results — possible IMAP sync issue",
-                )
-
-            log.info(
-                "scheduler.email_scanner_completed",
-                emails_found=emails_found,
-                emails_moved=emails_moved,
-                emails_deleted=emails_deleted,
-                tasks_created=tasks_created,
-                notes_created=notes_created,
-                tool_errors=tool_errors,
-                tool_calls=tool_calls,
-            )
-            return {
-                "emails_found": emails_found,
-                "emails_moved": emails_moved,
-                "emails_deleted": emails_deleted,
-                "tasks_created": tasks_created,
-                "notes_created": notes_created,
-                "tool_errors": tool_errors,
-            }
+            agent = build_email_scanner_agent()
+            result = await agent.run(prompt)
+            log.info("scheduler.email_scanner_completed")
+            return {"status": "completed"}
         except Exception:
-            log.exception(
-                "scheduler.email_scanner_failed",
-                emails_found=emails_found,
-                emails_moved=emails_moved,
-                emails_deleted=emails_deleted,
-                tool_errors=tool_errors,
-                tool_calls=tool_calls,
-            )
+            log.exception("scheduler.email_scanner_failed")
             raise
 
     # ------------------------------------------------------------------
@@ -842,20 +524,7 @@ class Scheduler:
 
     async def _run_email_unsubscriber_agent(self, notes: list[dict]) -> dict:
         """Spawn a subagent to execute unsubscribe actions."""
-        from claude_agent_sdk import (
-            AssistantMessage,
-            ClaudeAgentOptions,
-            ClaudeSDKClient,
-            ResultMessage,
-            SystemMessage,
-            ToolResultBlock,
-            ToolUseBlock,
-            UserMessage,
-        )
-        from app.su_notes_manager import su_notes_mcp_server
-        from app.unsubscribe_manager import unsubscribe_manager_mcp_server
-        from app.scary_internet_agent import scary_internet_mcp_server
-        from app.process_limiter import claude_process_slot
+        from app.agents import build_email_unsubscriber_agent
 
         # Build note summaries for the prompt
         note_summaries = []
@@ -890,146 +559,21 @@ class Scheduler:
             "Be efficient — don't waste turns on retries."
         )
 
-        system_prompt = (
-            f"You are {settings.su_name}'s email unsubscriber daemon. You process "
-            "unsubscribe requests identified by the email scanner. You can send "
-            "emails (for mailto: unsubscribe links) and use the dangerous_assignment "
-            "browser tool (for https: unsubscribe links). "
-            "Headless — no clarifying questions."
-        )
-
-        protonmail_mcp = {
-            "type": "stdio",
-            "command": "protonmail-mcp-server",
-            "args": [],
-            "env": {
-                "PROTONMAIL_USERNAME": settings.protonmail_username,
-                "PROTONMAIL_PASSWORD": settings.protonmail_password,
-                "PROTONMAIL_SMTP_HOST": settings.protonmail_smtp_host,
-                "PROTONMAIL_SMTP_PORT": str(settings.protonmail_smtp_port),
-                "PROTONMAIL_IMAP_HOST": settings.protonmail_imap_host,
-                "PROTONMAIL_IMAP_PORT": str(settings.protonmail_imap_port),
-            },
-        }
-
-        mcp_servers = {
-            "protonmail": protonmail_mcp,
-            "scary_internet": scary_internet_mcp_server,
-            "unsubscribe_manager": unsubscribe_manager_mcp_server,
-            "su_notes_manager": su_notes_mcp_server,
-        }
-        allowed = [
-            "mcp__protonmail__send_email",
-            "mcp__scary_internet__dangerous_assignment",
-            "mcp__unsubscribe_manager__check_unsubscribed",
-            "mcp__unsubscribe_manager__record_unsubscribe",
-            "mcp__unsubscribe_manager__list_unsubscribed",
-            "mcp__su_notes_manager__update_su_note",
-            "mcp__su_notes_manager__complete_su_note",
-        ]
-
-        options = ClaudeAgentOptions(
-            mcp_servers=mcp_servers,
-            allowed_tools=allowed,
-            disallowed_tools=[
-                "Task", "Bash", "Glob", "Grep", "Read", "Edit", "Write",
-                "WebFetch", "WebSearch", "NotebookEdit",
-            ],
-            permission_mode="bypassPermissions",
-            max_turns=30,
-            system_prompt=system_prompt,
-        )
-
-        # Counters for observability
-        notes_processed = 0
-        unsubscribes_completed = 0
-        unsubscribes_failed = 0
-        tool_errors = 0
-        tool_calls: dict[str, int] = {}
-        pending_tool_ids: dict[str, str] = {}
-
         try:
-            async with claude_process_slot(timeout=300, name="email_unsubscriber"), ClaudeSDKClient(options=options) as client:
-                await client.query(prompt)
-                async for message in client.receive_response():
-                    if isinstance(message, SystemMessage):
-                        if message.subtype == "init":
-                            for srv in message.data.get("mcp_servers", []):
-                                name = srv.get("name", "unknown")
-                                status = srv.get("status", "unknown")
-                                if status != "connected":
-                                    log.error(
-                                        "scheduler.email_unsubscriber_mcp_failed",
-                                        server_name=name,
-                                        server_status=status,
-                                    )
-                                else:
-                                    log.debug(
-                                        "scheduler.email_unsubscriber_mcp_connected",
-                                        server_name=name,
-                                    )
-
-                    elif isinstance(message, AssistantMessage):
-                        for block in message.content:
-                            if isinstance(block, ToolUseBlock):
-                                tool_calls[block.name] = tool_calls.get(block.name, 0) + 1
-                                pending_tool_ids[block.id] = block.name
-                                log.debug(
-                                    "scheduler.email_unsubscriber_tool_use",
-                                    tool=block.name,
-                                    input=str(block.input)[:300],
-                                )
-
-                    elif isinstance(message, UserMessage):
-                        content = message.content
-                        if isinstance(content, list):
-                            for block in content:
-                                if isinstance(block, ToolResultBlock):
-                                    tool_name = pending_tool_ids.pop(block.tool_use_id, "unknown")
-                                    if block.is_error:
-                                        tool_errors += 1
-                                        log.warning(
-                                            "scheduler.email_unsubscriber_tool_error",
-                                            tool=tool_name,
-                                            content=str(block.content)[:500],
-                                        )
-
-                    elif isinstance(message, ResultMessage):
-                        if message.is_error:
-                            log.warning(
-                                "scheduler.email_unsubscriber_error",
-                                result=message.result or "unknown",
-                            )
-                            return {
-                                "unsubscribe_notes_found": len(notes),
-                                "tool_errors": tool_errors,
-                                "error": message.result or "unknown",
-                            }
-
-            # Derive counts from tool calls
-            notes_processed = tool_calls.get("mcp__su_notes_manager__complete_su_note", 0)
-            unsubscribes_completed = tool_calls.get("mcp__unsubscribe_manager__record_unsubscribe", 0)
-
+            agent = build_email_unsubscriber_agent()
+            result = await agent.run(prompt)
             log.info(
                 "scheduler.email_unsubscriber_completed",
                 unsubscribe_notes_found=len(notes),
-                notes_processed=notes_processed,
-                unsubscribes_completed=unsubscribes_completed,
-                tool_errors=tool_errors,
-                tool_calls=tool_calls,
             )
             return {
                 "unsubscribe_notes_found": len(notes),
-                "notes_processed": notes_processed,
-                "unsubscribes_completed": unsubscribes_completed,
-                "tool_errors": tool_errors,
+                "status": "completed",
             }
         except Exception:
             log.exception(
                 "scheduler.email_unsubscriber_failed",
                 unsubscribe_notes_found=len(notes),
-                tool_errors=tool_errors,
-                tool_calls=tool_calls,
             )
             raise
 
@@ -1059,15 +603,7 @@ class Scheduler:
 
     async def _run_daily_review_agent(self) -> None:
         """Spawn a subagent to compose the morning brief."""
-        from claude_agent_sdk import (
-            ClaudeAgentOptions,
-            ClaudeSDKClient,
-            ResultMessage,
-        )
-        from app.memory_manager import get_basic_memory_mcp_config
-        from app.life_manager import life_manager_mcp_server
-        from app.su_notes_manager import su_notes_mcp_server
-        from app.process_limiter import claude_process_slot
+        from app.agents import build_daily_review_agent
 
         now = local_now()
         prompt = (
@@ -1086,55 +622,9 @@ class Scheduler:
             "Create the interjection with source='daily_review', urgency='normal'."
         )
 
-        system_prompt = (
-            f"You are {settings.su_name}'s daily review daemon. You compose a morning "
-            f"brief for {settings.user_name} covering the day's schedule, pending tasks, "
-            "and anything needing attention. Be concise and useful — no fluff. "
-            "Headless — no clarifying questions."
-        )
-
-        mcp_servers = {
-            "basic_memory": get_basic_memory_mcp_config(),
-            "life_manager": life_manager_mcp_server,
-            "su_notes_manager": su_notes_mcp_server,
-        }
-        allowed = [
-            "mcp__basic_memory__search_notes",
-            "mcp__basic_memory__recent_activity",
-            "mcp__life_manager__list_tasks",
-            "mcp__life_manager__list_events",
-            "mcp__life_manager__create_interjection",
-            "mcp__su_notes_manager__list_su_notes",
-        ]
-
-        if settings.telegram_bot_token:
-            from app.telegram_messenger import telegram_messenger_mcp_server
-            mcp_servers["telegram_messenger"] = telegram_messenger_mcp_server
-            allowed.append("mcp__telegram_messenger__send_telegram_message")
-
-        options = ClaudeAgentOptions(
-            mcp_servers=mcp_servers,
-            allowed_tools=allowed,
-            disallowed_tools=[
-                "Task", "Bash", "Glob", "Grep", "Read", "Edit", "Write",
-                "WebFetch", "WebSearch", "NotebookEdit",
-            ],
-            permission_mode="bypassPermissions",
-            max_turns=15,
-            system_prompt=system_prompt,
-        )
-
         try:
-            async with claude_process_slot(timeout=120, name="daily_review"), ClaudeSDKClient(options=options) as client:
-                await client.query(prompt)
-                async for message in client.receive_response():
-                    if isinstance(message, ResultMessage) and message.is_error:
-                        log.warning(
-                            "scheduler.daily_review_error",
-                            result=message.result or "unknown",
-                        )
-                        return
-
+            agent = build_daily_review_agent()
+            result = await agent.run(prompt)
             log.info("scheduler.daily_review_completed")
         except Exception:
             log.exception("scheduler.daily_review_failed")

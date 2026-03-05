@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     su_name: str = "SU"
 
     claude_code_oauth_token: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
+    anthropic_model: str = "claude-sonnet-4-6"
     self_iteration_mode: bool = False
 
     # Playwright MCP Bridge (optional — chat works without it)

@@ -2,29 +2,17 @@
 REM agent: post-session memory consolidation.
 
 Named after REM sleep — the phase when the brain consolidates short-term
-experiences into long-term memory.  When a chat session ends, this agent
+experiences into long-term memory. When a chat session ends, this agent
 reviews the full conversation and does two things:
 
 1. Writes narrative memories to basic-memory (semantic knowledge base)
-2. Extracts concrete tasks/events to SQLite via life_manager MCP tools
+2. Extracts concrete tasks/events to SQLite via life_manager tools
 
 This dual-write ensures that both the "soft" understanding and the
 "operational" state machine stay in sync.
 """
-from claude_agent_sdk import (
-    AssistantMessage,
-    ClaudeAgentOptions,
-    ClaudeSDKClient,
-    ResultMessage,
-    TextBlock,
-    ToolUseBlock,
-)
-
 from app.config import settings
 from app.logger import get_logger
-from app.memory_manager import get_basic_memory_mcp_config
-from app.life_manager import life_manager_mcp_server
-from app.process_limiter import claude_process_slot
 from app.session_manager import get_session
 
 log = get_logger(__name__)
@@ -121,19 +109,6 @@ def _build_checkpoint_system_prompt() -> str:
     + _rem_shared_instructions(user)
     )
 
-ALLOWED_TOOLS = [
-    # basic-memory tools
-    "mcp__basic_memory__write_note",
-    "mcp__basic_memory__edit_note",
-    "mcp__basic_memory__search_notes",
-    "mcp__basic_memory__read_note",
-    # life_manager tools (for task/event extraction)
-    "mcp__life_manager__create_task",
-    "mcp__life_manager__create_event",
-    "mcp__life_manager__list_tasks",
-    "mcp__life_manager__list_events",
-]
-
 
 def _build_transcript(messages: list) -> str:
     """Build a plaintext transcript from session messages."""
@@ -154,8 +129,10 @@ async def consolidate_memories(
     """Review a session (or segment) and write noteworthy memories.
 
     Returns the id of the last message processed, or None if nothing
-    was processed.  The caller uses this as a watermark for the next run.
+    was processed. The caller uses this as a watermark for the next run.
     """
+    from app.agents import build_rem_agent
+
     log.info("rem.started", session_id=session_id,
              after_message_id=after_message_id, is_checkpoint=is_checkpoint)
 
@@ -164,7 +141,6 @@ async def consolidate_memories(
         log.info("rem.no_messages", session_id=session_id)
         return None
 
-    # Filter to unprocessed messages when a watermark is provided
     messages = session.messages
     if after_message_id is not None:
         messages = [m for m in messages if m.id is not None and m.id > after_message_id]
@@ -192,7 +168,6 @@ async def consolidate_memories(
             "information. The conversation is still ongoing. "
             "Follow your instructions."
         )
-        system_prompt = _build_checkpoint_system_prompt()
     else:
         descriptor = "remaining" if after_message_id else "complete"
         prompt = (
@@ -201,51 +176,15 @@ async def consolidate_memories(
             "Analyze this conversation and store any noteworthy information "
             "in the knowledge base. Follow your instructions."
         )
-        system_prompt = _build_rem_system_prompt()
 
-    options = ClaudeAgentOptions(
-        mcp_servers={
-            "basic_memory": get_basic_memory_mcp_config(),
-            "life_manager": life_manager_mcp_server,
-        },
-        allowed_tools=ALLOWED_TOOLS,
-        disallowed_tools=[
-            "Task", "Bash", "Glob", "Grep", "Read", "Edit", "Write",
-            "WebFetch", "WebSearch", "NotebookEdit",
-        ],
-        permission_mode="bypassPermissions",
-        max_turns=20,
-        system_prompt=system_prompt,
-    )
+    agent = build_rem_agent(is_checkpoint=is_checkpoint)
 
-    async with claude_process_slot(timeout=180):
-        async with ClaudeSDKClient(options=options) as client:
-            await client.query(prompt)
-
-            async for message in client.receive_response():
-                if isinstance(message, AssistantMessage):
-                    for block in message.content:
-                        if isinstance(block, ToolUseBlock) and block.name in (
-                            "mcp__basic_memory__write_note",
-                            "mcp__basic_memory__edit_note",
-                        ):
-                            title = block.input.get("title", "?")
-                            content = block.input.get("content", "")
-                            log.info(
-                                "rem.memory_write",
-                                session_id=session_id,
-                                tool=block.name.split("__")[-1],
-                                title=title,
-                                lines=len(content.splitlines()),
-                            )
-                elif isinstance(message, ResultMessage):
-                    if message.is_error:
-                        log.warning(
-                            "rem.agent_error",
-                            session_id=session_id,
-                            result=message.result or "unknown",
-                        )
-                        return None
+    try:
+        result = await agent.run(prompt)
+        log.info("rem.agent_completed", session_id=session_id)
+    except Exception:
+        log.exception("rem.agent_error", session_id=session_id)
+        return None
 
     last_id = max((m.id for m in messages if m.id is not None), default=None)
     log.info("rem.completed", session_id=session_id,

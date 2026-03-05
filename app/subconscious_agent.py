@@ -8,18 +8,7 @@ natural-sounding "thought" injected into the session.
 """
 from typing import Optional
 
-from claude_agent_sdk import (
-    ClaudeAgentOptions,
-    ClaudeSDKClient,
-    AssistantMessage,
-    ResultMessage,
-    TextBlock,
-)
-
 from app.logger import get_logger
-from app.memory_manager import get_basic_memory_mcp_config
-from app.life_manager import life_manager_mcp_server
-from app.process_limiter import claude_process_slot
 from app.session_manager import get_session, save_message
 
 log = get_logger(__name__)
@@ -40,7 +29,6 @@ SUBCONSCIOUS_SYSTEM_PROMPT = (
     "Headless. No clarifying questions."
 )
 
-# Faster variant for the first message — one search + one calendar check, done.
 SUBCONSCIOUS_QUICK_PROMPT = (
     "You surface relevant memory and schedule context for SU. Given a "
     "conversation summary, do ONE quick knowledge-base search and ONE "
@@ -53,17 +41,6 @@ SUBCONSCIOUS_QUICK_PROMPT = (
     f"If nothing is relevant, respond with exactly: {NO_MEMORY_SENTINEL}\n\n"
     "Headless. No clarifying questions."
 )
-
-ALLOWED_TOOLS = [
-    # basic-memory (narrative recall)
-    "mcp__basic_memory__search_notes",
-    "mcp__basic_memory__build_context",
-    "mcp__basic_memory__recent_activity",
-    "mcp__basic_memory__read_note",
-    # life_manager (temporal awareness)
-    "mcp__life_manager__list_tasks",
-    "mcp__life_manager__list_events",
-]
 
 
 def _build_conversation_summary(messages: list, limit: int = 10) -> str:
@@ -84,9 +61,11 @@ async def search_memories(session_id: str, max_turns: int = 12) -> Optional[str]
     Parameters
     ----------
     max_turns : int
-        Maximum agentic round-trips.  Use 2 for a fast first-message check
-        (one search + one calendar lookup), 12 (default) for deeper periodic runs.
+        Maximum agentic round-trips. Use 2 for a fast first-message check,
+        12 (default) for deeper periodic runs.
     """
+    from app.agents import build_subconscious_agent
+
     quick = max_turns <= 2
     log.info("subconscious.started", session_id=session_id, quick=quick)
 
@@ -107,45 +86,16 @@ async def search_memories(session_id: str, max_turns: int = 12) -> Optional[str]
         "conversation. Follow your instructions."
     )
 
-    options = ClaudeAgentOptions(
-        mcp_servers={
-            "basic_memory": get_basic_memory_mcp_config(),
-            "life_manager": life_manager_mcp_server,
-        },
-        allowed_tools=ALLOWED_TOOLS,
-        disallowed_tools=[
-            "Task", "Bash", "Glob", "Grep", "Read", "Edit", "Write",
-            "WebFetch", "WebSearch", "NotebookEdit",
-        ],
-        permission_mode="bypassPermissions",
-        max_turns=max_turns,
-        system_prompt=SUBCONSCIOUS_QUICK_PROMPT if quick else SUBCONSCIOUS_SYSTEM_PROMPT,
-    )
-
-    thought: Optional[str] = None
-
-    slot_timeout = 10 if quick else 90
     log.info("subconscious.agent_starting", session_id=session_id, max_turns=max_turns)
-    async with claude_process_slot(timeout=slot_timeout):
-        async with ClaudeSDKClient(options=options) as client:
-            await client.query(prompt)
 
-            async for message in client.receive_response():
-                if isinstance(message, AssistantMessage):
-                    for block in message.content:
-                        if isinstance(block, TextBlock):
-                            if thought is None:
-                                thought = block.text
-                            else:
-                                thought += block.text
-                elif isinstance(message, ResultMessage):
-                    if message.is_error:
-                        log.warning(
-                            "subconscious.agent_error",
-                            session_id=session_id,
-                            result=message.result or "unknown",
-                        )
-                        return None
+    agent = build_subconscious_agent(quick=quick)
+
+    try:
+        result = await agent.run(prompt)
+        thought = result.output
+    except Exception:
+        log.exception("subconscious.agent_error", session_id=session_id)
+        return None
 
     if not thought or NO_MEMORY_SENTINEL in thought:
         log.info("subconscious.no_relevant_memories", session_id=session_id)

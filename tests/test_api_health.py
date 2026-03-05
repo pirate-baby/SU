@@ -12,7 +12,7 @@ class TestHealthEndpoint:
         data = resp.json()
         assert data["status"] == "healthy"
         assert data["service"] == "su-personal-assistant"
-        assert data["version"] == "3.0.0"
+        assert data["version"] == "4.0.0"
 
 
 class TestPageRoutes:

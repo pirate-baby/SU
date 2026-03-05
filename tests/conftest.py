@@ -5,7 +5,7 @@ Provides:
 - Temporary SQLite database per test (isolated)
 - Initialized schema via init_database()
 - FastAPI async test client wired to the test DB
-- Mock ClaudeChat that yields predictable events
+- Mock SessionState that yields predictable events
 """
 import asyncio
 import os
@@ -102,47 +102,48 @@ async def client():
 
 
 # ---------------------------------------------------------------------------
-# Mock ClaudeChat
+# Mock SessionState
 # ---------------------------------------------------------------------------
 
-class MockClaudeChat:
-    """A fake ClaudeChat that yields configurable events."""
+class MockSessionState:
+    """A fake SessionState that yields configurable events.
+
+    Replaces the old MockClaudeChat. The interface matches
+    app.agent_registry.SessionState.send_message_with_tools().
+    """
 
     def __init__(self, responses=None):
         self._responses = responses or [
             {"type": "text", "content": "Hello from mock Claude."},
         ]
-        self.connected = False
         self.messages_sent = []
+        self._lock = asyncio.Lock()
 
-    async def connect(self):
-        self.connected = True
+    async def send_message_with_tools(self, message: str):
+        self.messages_sent.append(message)
+        for event in self._responses:
+            yield event
 
-    async def disconnect(self):
-        self.connected = False
+    async def send_message_streaming(self, message: str):
+        self.messages_sent.append(message)
+        for event in self._responses:
+            yield event
 
     async def send_message(self, message: str):
         self.messages_sent.append(message)
         for event in self._responses:
             yield event
 
-    async def __aenter__(self):
-        await self.connect()
-        return self
 
-    async def __aexit__(self, *args):
-        await self.disconnect()
+@pytest.fixture
+def mock_session_state():
+    """Return a MockSessionState instance."""
+    return MockSessionState()
 
 
 @pytest.fixture
-def mock_claude():
-    """Return a MockClaudeChat instance."""
-    return MockClaudeChat()
-
-
-@pytest.fixture
-def mock_claude_factory():
-    """Return a factory for creating MockClaudeChat with custom responses."""
+def mock_session_state_factory():
+    """Return a factory for creating MockSessionState with custom responses."""
     def factory(responses=None):
-        return MockClaudeChat(responses=responses)
+        return MockSessionState(responses=responses)
     return factory

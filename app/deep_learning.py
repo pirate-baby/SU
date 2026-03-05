@@ -11,8 +11,7 @@ consolidating, and reviewing. When triggered, this module:
 5. REFINE — fixes issues flagged during audit
 
 The controller loop (`run_deep_learning`) orchestrates these phases sequentially,
-spawning short-lived Claude agents for each step. The controller itself holds no
-process slot, so normal chat continues unblocked.
+spawning short-lived pydantic-ai agents for each step.
 """
 import asyncio
 import json
@@ -24,14 +23,6 @@ from pathlib import Path
 from typing import Any, Callable, Coroutine, Optional
 
 import aiosqlite
-from claude_agent_sdk import (
-    AssistantMessage,
-    ClaudeAgentOptions,
-    ClaudeSDKClient,
-    ResultMessage,
-    TextBlock,
-    ToolUseBlock,
-)
 
 from app.config import settings
 from app.daemon_registry import (
@@ -41,8 +32,6 @@ from app.daemon_registry import (
     daemon_registry,
 )
 from app.logger import get_logger
-from app.memory_manager import get_basic_memory_mcp_config
-from app.process_limiter import claude_process_slot
 
 log = get_logger(__name__)
 
@@ -250,11 +239,6 @@ BASIC_MEMORY_TOOLS_EXTENDED = BASIC_MEMORY_TOOLS + [
     "mcp__basic_memory__delete_note",
 ]
 
-DISALLOWED_TOOLS = [
-    "Task", "Bash", "Glob", "Grep", "Read", "Edit", "Write",
-    "WebFetch", "WebSearch", "NotebookEdit",
-]
-
 
 def _ingest_system_prompt() -> str:
     return (
@@ -379,7 +363,7 @@ def _refine_system_prompt() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Agent spawning helpers
+# Agent spawning helper
 # ---------------------------------------------------------------------------
 
 async def _spawn_agent(
@@ -390,36 +374,31 @@ async def _spawn_agent(
     max_turns: int = 30,
     timeout: int = 300,
 ) -> dict[str, int]:
-    """Spawn a short-lived Claude agent and return write/edit counts."""
+    """Spawn a short-lived pydantic-ai agent and return write/edit counts."""
+    from app.agents import build_deep_learning_agent
+
     stats = {"writes": 0, "edits": 0, "errors": 0}
 
-    options = ClaudeAgentOptions(
-        mcp_servers={"basic_memory": get_basic_memory_mcp_config()},
-        allowed_tools=allowed_tools,
-        disallowed_tools=DISALLOWED_TOOLS,
-        permission_mode="bypassPermissions",
-        max_turns=max_turns,
-        system_prompt=system_prompt,
-    )
-
     try:
-        async with claude_process_slot(timeout=timeout, name=f"deep_learning_{phase_name}"):
-            async with ClaudeSDKClient(options=options) as client:
-                await client.query(user_prompt)
-                async for message in client.receive_response():
-                    if isinstance(message, AssistantMessage):
-                        for block in message.content:
-                            if isinstance(block, ToolUseBlock):
-                                if "write_note" in block.name:
-                                    stats["writes"] += 1
-                                elif "edit_note" in block.name:
-                                    stats["edits"] += 1
-                    elif isinstance(message, ResultMessage) and message.is_error:
-                        log.warning(
-                            f"deep_learning.{phase_name}_agent_error",
-                            result=message.result or "unknown",
-                        )
-                        stats["errors"] += 1
+        agent = build_deep_learning_agent(system_prompt=system_prompt)
+        result = await asyncio.wait_for(
+            agent.run(user_prompt),
+            timeout=timeout,
+        )
+
+        # Count tool calls from the messages
+        for msg in result.all_messages():
+            for part in msg.parts:
+                tool_name = getattr(part, 'tool_name', None)
+                if tool_name:
+                    if "write_note" in tool_name:
+                        stats["writes"] += 1
+                    elif "edit_note" in tool_name:
+                        stats["edits"] += 1
+
+    except asyncio.TimeoutError:
+        log.warning(f"deep_learning.{phase_name}_timeout", timeout=timeout)
+        stats["errors"] += 1
     except asyncio.CancelledError:
         log.warning(f"deep_learning.{phase_name}_cancelled")
         stats["errors"] += 1
@@ -534,7 +513,7 @@ async def _run_ingest_phase(run_id: str) -> None:
             await DocRepo.update(doc["id"], chunks_processed=chunk_idx + 1)
             await _broadcast_progress(run_id)
 
-            # Yield to other processes
+            # Yield to other tasks
             await asyncio.sleep(2)
 
         await DocRepo.update(
@@ -557,8 +536,6 @@ async def _run_cross_reference_phase(run_id: str) -> None:
     await _update_run(run_id, phase="cross_reference",
                       current_step="Cross-referencing new knowledge with existing memory")
 
-    # The agent itself will use recent_activity + search to find and link notes.
-    # We give it a broad instruction and let it work.
     prompt = (
         "Review recently-created notes in the knowledge base (use recent_activity). "
         "For each new note, search for related existing notes and add bidirectional "
@@ -738,8 +715,7 @@ async def _run_refine_phase(run_id: str) -> None:
 async def run_deep_learning(run_id: str, audit_only: bool = False) -> None:
     """Main controller loop for a deep learning run.
 
-    Orchestrates all phases sequentially. Each phase spawns short-lived agents
-    that acquire their own process slots. This function holds no process slot.
+    Orchestrates all phases sequentially. Each phase spawns short-lived agents.
     """
     log.info("deep_learning.run_starting", run_id=run_id, audit_only=audit_only)
     await _update_run(run_id, status="running",

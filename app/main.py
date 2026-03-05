@@ -27,24 +27,23 @@ from app.session_manager import (
     update_session_activity,
     end_session,
 )
-from app.claude_client import ClaudeChat
 from app.memory_manager import on_first_message, on_user_message, on_session_end
 from app.models import SessionCreateResponse
 from app.agent_registry import (
-    get_or_create_agent,
+    get_or_create_session as get_or_create_agent_session,
     get_lock,
     touch,
-    release_agent,
-    cleanup_idle_agents,
+    release_session,
+    cleanup_idle_sessions,
     mark_ws_connected,
     mark_ws_disconnected,
+    SessionState,
 )
 from app.scheduler import scheduler
 from app.daemon_registry import (
     daemon_registry, DaemonInfo, DaemonCategory,
     cleanup_stale_runs, get_last_completed_run, get_runs,
 )
-from app.process_limiter import get_slot_status
 from app.repositories import TaskRepo, EventRepo, InterjectionRepo, SuNoteRepo
 from app.deep_learning import (
     DocRepo as DLDocRepo,
@@ -156,7 +155,7 @@ async def lifespan(app: FastAPI):
         description="Batches log entries into SQLite",
     ))
 
-    cleanup_task = asyncio.create_task(cleanup_idle_agents())
+    cleanup_task = asyncio.create_task(cleanup_idle_sessions())
     await scheduler.start(push_interjection_to_clients)
     dl_set_broadcast_fn(broadcast_deep_learning_progress)
 
@@ -165,7 +164,7 @@ async def lifespan(app: FastAPI):
         from app.telegram_bot import start_polling
         start_polling()
 
-    log.info("app.startup", version="3.0.0")
+    log.info("app.startup", version="4.0.0")
 
     # Trigger REM for any sessions that were still active at shutdown
     # (e.g. tab closed, process killed) so their memories are not lost.
@@ -188,7 +187,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="SU — Personal Assistant",
-    version="3.0.0",
+    version="4.0.0",
     lifespan=lifespan
 )
 
@@ -335,7 +334,7 @@ async def end_all_active_sessions():
     ended: list[str] = []
     for sid in active_ids:
         await end_session(sid)
-        await release_agent(sid)
+        await release_session(sid)
         asyncio.ensure_future(on_session_end(sid))
         ended.append(sid)
     log.info("sessions.ended_all", count=len(ended))
@@ -349,7 +348,7 @@ async def end_chat_session(session_id: str, skip_rem: bool = False):
         raise HTTPException(status_code=404, detail="Session not found")
 
     await end_session(session_id)
-    await release_agent(session_id)
+    await release_session(session_id)
     log.info("session.ended", session_id=session_id, skip_rem=skip_rem)
     if not skip_rem:
         asyncio.ensure_future(on_session_end(session_id))
@@ -482,7 +481,6 @@ async def api_daemon_index():
 
     return {
         "daemons": daemons,
-        "process_limiter": get_slot_status(),
     }
 
 
@@ -902,7 +900,13 @@ VOICE_MODE_INSTRUCTION = (
 )
 
 
-async def stream_claude_response(websocket: WebSocket, session_id: str, user_message: str, claude: ClaudeChat, voice_mode: bool = False):
+async def stream_claude_response(
+    websocket: WebSocket,
+    session_id: str,
+    user_message: str,
+    session_state: SessionState,
+    voice_mode: bool = False,
+):
     ws_live = await _ws_send(websocket, {"type": "assistant_start"})
 
     # Set up TTS if voice mode is active
@@ -919,7 +923,7 @@ async def stream_claude_response(websocket: WebSocket, session_id: str, user_mes
             tts = None
 
     full_response = ""
-    async for event in claude.send_message(user_message):
+    async for event in session_state.send_message_with_tools(user_message):
         event_type = event["type"]
 
         if event_type == "text":
@@ -1015,7 +1019,13 @@ async def _collect_and_consume_memories(session_id: str, session=None) -> Option
     return context_prefix
 
 
-async def handle_user_message(websocket: WebSocket, session_id: str, user_message: str, claude: ClaudeChat, voice_mode: bool = False):
+async def handle_user_message(
+    websocket: WebSocket,
+    session_id: str,
+    user_message: str,
+    session_state: SessionState,
+    voice_mode: bool = False,
+):
     await save_message(session_id, "user", user_message)
     log.info("chat.user_message", session_id=session_id, length=len(user_message), voice_mode=voice_mode)
     await websocket.send_json({
@@ -1050,7 +1060,7 @@ async def handle_user_message(websocket: WebSocket, session_id: str, user_messag
         effective_message = (context_prefix + user_message) if context_prefix else user_message
         if voice_mode:
             effective_message = VOICE_MODE_INSTRUCTION + effective_message
-        await stream_claude_response(websocket, session_id, effective_message, claude, voice_mode=voice_mode)
+        await stream_claude_response(websocket, session_id, effective_message, session_state, voice_mode=voice_mode)
     except Exception as e:
         log.exception("chat.handle_error", session_id=session_id, error=str(e))
         await _ws_send(websocket, {
@@ -1097,13 +1107,13 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
     await websocket.send_json({"type": "status", "content": "Initializing..."})
 
     try:
-        claude = await get_or_create_agent(session_id)
-        log.info("ws.claude_initialized", session_id=session_id)
+        session_state = await get_or_create_agent_session(session_id)
+        log.info("ws.agent_initialized", session_id=session_id)
     except Exception as e:
-        log.exception("ws.claude_init_failed", session_id=session_id, error=str(e))
+        log.exception("ws.agent_init_failed", session_id=session_id, error=str(e))
         await websocket.send_json({
             "type": "error",
-            "content": f"Failed to initialize Claude client: {str(e)}"
+            "content": f"Failed to initialize agent: {str(e)}"
         })
         await websocket.close()
         _active_connections.pop(session_id, None)
@@ -1121,12 +1131,12 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
                 user_message = message_data.get("content", "").strip()
                 if user_message:
                     touch(session_id)
-                    await handle_user_message(websocket, session_id, user_message, claude)
+                    await handle_user_message(websocket, session_id, user_message, session_state)
             elif msg_type == "voice_message":
                 user_message = message_data.get("content", "").strip()
                 if user_message:
                     touch(session_id)
-                    await handle_user_message(websocket, session_id, user_message, claude, voice_mode=True)
+                    await handle_user_message(websocket, session_id, user_message, session_state, voice_mode=True)
             elif msg_type == "call_action":
                 action = message_data.get("action")
                 log.info("ws.call_action", session_id=session_id, action=action)
@@ -1172,7 +1182,7 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "su-personal-assistant",
-        "version": "3.0.0"
+        "version": "4.0.0"
     }
 
 

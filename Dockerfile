@@ -4,8 +4,7 @@ FROM python:3.12-slim
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies (curl for healthcheck, nodejs for claude runtime, git for self-iteration)
-# Note: claude-agent-sdk bundles its own claude binary, but needs nodejs as runtime
+# Install system dependencies (curl for healthcheck, nodejs for protonmail-mcp-server, git for self-iteration)
 RUN apt-get update && apt-get install -y \
     curl \
     git \
