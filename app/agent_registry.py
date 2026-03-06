@@ -85,8 +85,8 @@ class SessionState:
                     yield {"type": "text", "content": text_delta}
 
                 # After streaming completes, update history
-                result = stream.get()
-                self.message_history = result.all_messages()
+                result = await stream.get_output()
+                self.message_history = stream.all_messages()
 
         except Exception as e:
             log.exception("session.stream_error", session_id=self.session_id, error=str(e))
