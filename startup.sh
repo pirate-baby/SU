@@ -22,7 +22,11 @@ if [ "${1:-}" = "stop" ]; then
 
     # Stop Docker containers
     echo "  Stopping Docker containers..."
-    docker compose -f "$SCRIPT_DIR/docker-compose.yml" -f "$SCRIPT_DIR/docker-compose.local.yml" down 2>/dev/null || true
+    COMPOSE_FILES="-f $SCRIPT_DIR/docker-compose.yml"
+    if [ "$(uname)" = "Darwin" ]; then
+        COMPOSE_FILES="$COMPOSE_FILES -f $SCRIPT_DIR/docker-compose.local.yml"
+    fi
+    docker compose $COMPOSE_FILES down 2>/dev/null || true
 
     rm -f "$PID_FILE"
     echo "All services stopped."
@@ -274,8 +278,17 @@ fi
 # Docker services
 # ---------------------------------------------------------------------------
 
-echo "Starting services with local development configuration..."
-docker compose -f "$SCRIPT_DIR/docker-compose.yml" -f "$SCRIPT_DIR/docker-compose.local.yml" up --build -d
+# Use the local override (different ports, rw mounts) when running on macOS.
+# On Linux (EC2), use the base config only — nginx binds directly to 80/443.
+COMPOSE_FILES="-f $SCRIPT_DIR/docker-compose.yml"
+if [ "$(uname)" = "Darwin" ]; then
+    COMPOSE_FILES="$COMPOSE_FILES -f $SCRIPT_DIR/docker-compose.local.yml"
+    echo "Starting services with local (macOS) configuration..."
+else
+    echo "Starting services with production configuration..."
+fi
+
+docker compose $COMPOSE_FILES up --build -d
 
 echo ""
 echo "Services started successfully! (all processes daemonized)"
