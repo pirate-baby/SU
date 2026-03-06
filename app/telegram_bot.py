@@ -26,7 +26,7 @@ from app.telegram_session import (
     touch_session,
 )
 from app.session_manager import save_message, update_session_activity
-from app.agent_registry import get_or_create_agent, get_lock, touch
+from app.agent_registry import get_or_create_session as get_or_create_agent, get_lock, touch
 from app.memory_manager import on_first_message, on_user_message
 
 log = get_logger(__name__)

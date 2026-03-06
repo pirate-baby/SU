@@ -16,7 +16,7 @@ from app.session_manager import (
     save_message,
     update_session_activity,
 )
-from app.agent_registry import release_agent
+from app.agent_registry import release_session
 from app.memory_manager import on_session_end, on_checkpoint
 
 log = get_logger(__name__)
@@ -98,7 +98,7 @@ async def _on_timeout(session_id: str, chat_id: int) -> None:
     log.info("telegram.session_timeout", session_id=session_id, chat_id=chat_id)
 
     await end_session(session_id)
-    await release_agent(session_id)
+    await release_session(session_id)
     asyncio.ensure_future(on_session_end(session_id))
 
 
