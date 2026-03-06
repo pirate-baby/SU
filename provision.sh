@@ -78,7 +78,7 @@ cat > "$POLICY_FILE" <<'POLICY'
 POLICY
 echo "Playwright MCP Bridge extension will auto-install in Chrome (policy: $POLICY_FILE)"
 
-echo "=== 4/7 Node.js 20 (for Playwright MCP, Vibe Kanban) ==="
+echo "=== 4/7 Node.js 20 (for Playwright MCP) ==="
 NODE_VERSION=$(node -v 2>/dev/null | sed 's/^v//' | cut -d. -f1 || echo "0")
 if [ "$NODE_VERSION" -lt 18 ]; then
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
