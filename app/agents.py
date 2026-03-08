@@ -12,7 +12,7 @@ from typing import Any
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.providers.anthropic import AnthropicProvider
-from pydantic_ai.mcp import MCPServerStdio, MCPServerSSE
+from pydantic_ai.mcp import MCPServerStdio, MCPServerSSE, MCPServerStreamableHTTP
 
 from app.config import settings
 from app.tz import now as local_now
@@ -48,8 +48,8 @@ model = _build_model()
 # MCP Servers (shared across agents that need them)
 # ---------------------------------------------------------------------------
 
-def _build_basic_memory_mcp() -> MCPServerStdio:
-    return MCPServerStdio("uvx", args=["basic-memory", "mcp"])
+def _build_basic_memory_mcp() -> MCPServerStreamableHTTP:
+    return MCPServerStreamableHTTP(settings.basic_memory_mcp_url)
 
 
 def _build_playwright_mcp() -> MCPServerSSE | None:
@@ -63,6 +63,7 @@ def _build_protonmail_mcp() -> MCPServerStdio | None:
         return MCPServerStdio(
             "protonmail-mcp-server",
             args=[],
+            timeout=30,
             env={
                 "PROTONMAIL_USERNAME": settings.protonmail_username,
                 "PROTONMAIL_PASSWORD": settings.protonmail_password,

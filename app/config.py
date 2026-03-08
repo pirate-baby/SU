@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-sonnet-4-6"
     self_iteration_mode: bool = False
 
+    # basic-memory MCP sidecar (streamable-http, started by entrypoint.sh)
+    basic_memory_mcp_url: str = "http://127.0.0.1:8765/mcp"
+
     # Playwright MCP Bridge (optional — chat works without it)
     playwright_mcp_url: Optional[str] = None
 

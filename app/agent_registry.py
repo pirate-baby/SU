@@ -22,6 +22,14 @@ from app.session_manager import get_session
 
 log = get_logger(__name__)
 
+
+def _unwrap_exception_group(exc: BaseException) -> str:
+    """Recursively unwrap ExceptionGroup to find the root cause message."""
+    if isinstance(exc, BaseExceptionGroup):
+        for sub in exc.exceptions:
+            return _unwrap_exception_group(sub)
+    return f"{type(exc).__name__}: {exc}"
+
 # Register the agent cleanup daemon
 daemon_registry.register(DaemonInfo(
     name="agent_cleanup",
@@ -66,9 +74,10 @@ class SessionState:
                 if isinstance(output, str) and output:
                     yield {"type": "text", "content": output}
 
-        except Exception as e:
-            log.exception("session.send_error", session_id=self.session_id, error=str(e))
-            yield {"type": "error", "content": f"Error communicating with Claude: {str(e)}"}
+        except BaseException as e:
+            detail = _unwrap_exception_group(e) if isinstance(e, BaseExceptionGroup) else str(e)
+            log.exception("session.send_error", session_id=self.session_id, error=detail)
+            yield {"type": "error", "content": f"Error communicating with Claude: {detail}"}
 
     async def send_message_streaming(self, user_message: str) -> AsyncGenerator[dict[str, Any], None]:
         """Send a message and stream back events in real-time.
@@ -88,9 +97,10 @@ class SessionState:
                 result = await stream.get_output()
                 self.message_history = stream.all_messages()
 
-        except Exception as e:
-            log.exception("session.stream_error", session_id=self.session_id, error=str(e))
-            yield {"type": "error", "content": f"Error communicating with Claude: {str(e)}"}
+        except BaseException as e:
+            detail = _unwrap_exception_group(e) if isinstance(e, BaseExceptionGroup) else str(e)
+            log.exception("session.stream_error", session_id=self.session_id, error=detail)
+            yield {"type": "error", "content": f"Error communicating with Claude: {detail}"}
 
     async def send_message_with_tools(self, user_message: str) -> AsyncGenerator[dict[str, Any], None]:
         """Send a message and yield all events including tool calls/results.
@@ -139,9 +149,10 @@ class SessionState:
 
                 self.message_history = result.all_messages()
 
-        except Exception as e:
-            log.exception("session.send_error", session_id=self.session_id, error=str(e))
-            yield {"type": "error", "content": f"Error communicating with Claude: {str(e)}"}
+        except BaseException as e:
+            detail = _unwrap_exception_group(e) if isinstance(e, BaseExceptionGroup) else str(e)
+            log.exception("session.send_error", session_id=self.session_id, error=detail)
+            yield {"type": "error", "content": f"Error communicating with Claude: {detail}"}
 
 
 # Live session states keyed by session_id

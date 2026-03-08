@@ -33,8 +33,10 @@ COPY pyproject.toml uv.lock ./
 # Install dependencies with native UV (uses lock file for reproducibility)
 RUN uv sync --frozen --no-dev
 
-# Copy application code
+# Copy application code and entrypoint
 COPY app/ ./app/
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
 # Create a non-root user for security (match host UID for volume access)
 RUN useradd -m -u 501 appuser && \
@@ -54,14 +56,16 @@ RUN git config --global user.email "su@localhost" && \
 USER appuser
 
 # Install basic-memory MCP server as appuser so uvx can find it at runtime
-RUN uv tool install basic-memory
+# Then pre-compile bytecache (.pyc) to eliminate import overhead at startup
+RUN uv tool install basic-memory && \
+    python -m compileall -q /home/appuser/.local/share/uv/tools/basic-memory/
 
 # Expose port
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+# Health check (allow extra start time for basic-memory sidecar)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Run the application using UV's virtual environment
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Start basic-memory sidecar, then uvicorn
+ENTRYPOINT ["/app/entrypoint.sh"]

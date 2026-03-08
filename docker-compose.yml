@@ -39,6 +39,7 @@ services:
       - TZ=America/New_York
       - PYTHONUNBUFFERED=1
       - BASIC_MEMORY_CONFIG_DIR=/home/appuser/basic-memory
+      - BASIC_MEMORY_MCP_URL=${BASIC_MEMORY_MCP_URL:-http://127.0.0.1:8765/mcp}
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
       - DATABASE_PATH=/data/sessions.db
       - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
