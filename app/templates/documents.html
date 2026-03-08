@@ -475,15 +475,56 @@
         ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
         ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
+        /* Mobile toggle button */
+        .sidebar-toggle {
+            display: none;
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            font-size: 18px;
+            cursor: pointer;
+            padding: 4px 8px;
+            font-family: var(--mono);
+            line-height: 1;
+        }
+        .sidebar-toggle:hover { color: var(--green); border-color: var(--green-dim); }
+
+        /* Mobile overlay */
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 9;
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
-            .sidebar { display: none; }
-            .sidebar.open { display: flex; position: absolute; z-index: 10; height: calc(100vh - 48px); }
+            .topbar { gap: 8px; padding: 0 10px; overflow-x: auto; }
+            .topbar h1 { font-size: 12px; white-space: nowrap; }
+            .topbar a { font-size: 11px; white-space: nowrap; }
+            .sidebar-toggle { display: block; }
+            .sidebar {
+                display: none;
+                position: fixed;
+                left: 0;
+                top: 48px;
+                z-index: 10;
+                height: calc(100vh - 48px);
+                width: 280px;
+                min-width: 0;
+            }
+            .sidebar.open { display: flex; }
+            .sidebar-overlay.open { display: block; }
+            .title-bar { padding: 8px 12px; }
+            .title-input { font-size: 14px; }
+            .footer-bar { padding: 6px 12px; }
         }
     </style>
 </head>
 <body>
     <div class="topbar">
+        <button class="sidebar-toggle" id="sidebar-toggle">&#9776;</button>
         <h1>SU // Documents</h1>
         <a href="/">Home</a>
         <a href="/planner">Planner</a>
@@ -492,6 +533,7 @@
         <a href="/deep-learning">Deep Learning</a>
     </div>
 
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
     <div class="layout">
         <div class="sidebar" id="sidebar">
             <div class="sidebar-header">
@@ -838,6 +880,26 @@
                     e.preventDefault();
                     createDocument();
                 }
+            }
+        });
+
+        // ---- Mobile sidebar toggle ----
+        const sidebarEl = document.getElementById('sidebar');
+        const sidebarToggle = document.getElementById('sidebar-toggle');
+        const sidebarOverlay = document.getElementById('sidebar-overlay');
+
+        function toggleSidebar() {
+            sidebarEl.classList.toggle('open');
+            sidebarOverlay.classList.toggle('open');
+        }
+        sidebarToggle.addEventListener('click', toggleSidebar);
+        sidebarOverlay.addEventListener('click', toggleSidebar);
+
+        // Close sidebar when a doc item is clicked on mobile
+        docListEl.addEventListener('click', () => {
+            if (window.innerWidth <= 768) {
+                sidebarEl.classList.remove('open');
+                sidebarOverlay.classList.remove('open');
             }
         });
 

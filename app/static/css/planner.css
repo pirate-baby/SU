@@ -523,11 +523,53 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
+/* Mobile toggle button */
+.sidebar-toggle {
+    display: none;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 18px;
+    cursor: pointer;
+    padding: 4px 8px;
+    font-family: var(--mono);
+    line-height: 1;
+}
+.sidebar-toggle:hover { color: var(--green); border-color: var(--green-dim); }
+
+.sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 9;
+}
+
 /* Responsive */
 @media (max-width: 900px) {
     .sidebar { width: 260px; min-width: 260px; }
 }
 @media (max-width: 640px) {
-    .layout { flex-direction: column; }
-    .sidebar { width: 100%; min-width: 0; max-height: 40vh; }
+    .topbar { gap: 8px; padding: 0 10px; }
+    .topbar h1 { font-size: 12px; white-space: nowrap; }
+    .topbar-nav { gap: 8px; }
+    .topbar-nav a { font-size: 11px; white-space: nowrap; }
+    .sidebar-toggle { display: block; }
+    .sidebar {
+        display: none;
+        position: fixed;
+        left: 0;
+        top: 48px;
+        z-index: 10;
+        height: calc(100vh - 48px);
+        width: 300px;
+        min-width: 0;
+    }
+    .sidebar.open { display: flex; }
+    .sidebar-overlay.open { display: block; }
+    .sidebar-section { max-height: none; }
+    .calendar-controls { flex-wrap: wrap; height: auto; padding: 8px 10px; gap: 6px; }
+    .calendar-controls h2 { font-size: 12px; min-width: 0; }
+    .calendar-grid { grid-template-columns: 40px repeat(7, 1fr); grid-template-rows: 36px repeat(24, 40px); }
+    .cal-time { font-size: 9px; padding-right: 3px; }
 }

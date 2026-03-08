@@ -13,6 +13,7 @@
 </head>
 <body>
     <div class="topbar">
+        <button class="sidebar-toggle" id="sidebar-toggle">&#9776;</button>
         <h1>SU // Planner</h1>
         <nav class="topbar-nav">
             <a href="/">Home</a>
@@ -24,9 +25,10 @@
         </nav>
     </div>
 
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
     <div class="layout">
         <!-- Left sidebar: tasks -->
-        <div class="sidebar">
+        <div class="sidebar" id="planner-sidebar">
             <div class="sidebar-header">
                 <span>Tasks</span>
                 <button class="icon-btn" id="add-task-btn" title="New task">+</button>
@@ -168,5 +170,27 @@
     </div>
 
     <script src="/static/js/planner.js"></script>
+    <script>
+    (function() {
+        const sidebar = document.getElementById('planner-sidebar');
+        const toggle = document.getElementById('sidebar-toggle');
+        const overlay = document.getElementById('sidebar-overlay');
+
+        function toggleSidebar() {
+            sidebar.classList.toggle('open');
+            overlay.classList.toggle('open');
+        }
+        toggle.addEventListener('click', toggleSidebar);
+        overlay.addEventListener('click', toggleSidebar);
+
+        // Close sidebar when clicking a task on mobile
+        sidebar.addEventListener('click', (e) => {
+            if (e.target.closest('.task-item') && window.innerWidth <= 640) {
+                sidebar.classList.remove('open');
+                overlay.classList.remove('open');
+            }
+        });
+    })();
+    </script>
 </body>
 </html>

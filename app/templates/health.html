@@ -250,6 +250,13 @@
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
         ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .topbar { gap: 8px; padding: 0 10px; overflow-x: auto; }
+            .topbar h1 { font-size: 12px; white-space: nowrap; }
+            .topbar a { font-size: 11px; white-space: nowrap; }
+        }
     </style>
 </head>
 <body>
