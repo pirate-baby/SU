@@ -188,7 +188,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="SU — Personal Assistant",
     version="4.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url="/api/swagger",
+    redoc_url="/api/redoc",
 )
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
