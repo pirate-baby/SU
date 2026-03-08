@@ -62,6 +62,7 @@ def _build_protonmail_mcp() -> MCPServerStdio | None:
     if settings.protonmail_username and settings.protonmail_password:
         return MCPServerStdio(
             "protonmail-mcp-server",
+            args=[],
             env={
                 "PROTONMAIL_USERNAME": settings.protonmail_username,
                 "PROTONMAIL_PASSWORD": settings.protonmail_password,
