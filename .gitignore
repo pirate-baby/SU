@@ -46,6 +46,9 @@ ENV/
 # Database
 *.db
 
+# Persistent data (bind-mounted into Docker containers)
+data/
+
 # Docker
 .env
 

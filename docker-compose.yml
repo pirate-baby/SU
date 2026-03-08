@@ -5,12 +5,12 @@ services:
       dockerfile: Dockerfile
     container_name: proton-bridge
     volumes:
-      # Persist bridge auth state across rebuilds
-      - proton-bridge-config:/home/proton/.config/protonmail
-      - proton-bridge-gnupg:/home/proton/.gnupg
-      - proton-bridge-data:/home/proton/.local/share/protonmail
-      - proton-bridge-cache:/home/proton/.cache/protonmail
-      - proton-bridge-pass:/home/proton/.password-store
+      # Persist bridge auth state across rebuilds (bind mounts survive docker volume prune)
+      - ./data/proton-bridge/config:/home/proton/.config/protonmail
+      - ./data/proton-bridge/gnupg:/home/proton/.gnupg
+      - ./data/proton-bridge/data:/home/proton/.local/share/protonmail
+      - ./data/proton-bridge/cache:/home/proton/.cache/protonmail
+      - ./data/proton-bridge/pass:/home/proton/.password-store
     restart: unless-stopped
     deploy:
       resources:
@@ -31,8 +31,8 @@ services:
     volumes:
       - ${HOME}/.claude:/home/appuser/.claude:ro
       - ${CLAUDE_WORKDIR:-./claude-workspace}:/workspace
-      - basic-memory-data:/home/appuser/basic-memory
-      - session-data:/data
+      - ./data/basic-memory:/home/appuser/basic-memory
+      - ./data/sessions:/data
       - ./.env:/app/.env:ro
       - .:/src
     environment:
@@ -99,14 +99,7 @@ services:
     networks:
       - claude-network
 
-volumes:
-  basic-memory-data:
-  session-data:
-  proton-bridge-config:
-  proton-bridge-gnupg:
-  proton-bridge-data:
-  proton-bridge-cache:
-  proton-bridge-pass:
+volumes: {}
 
 networks:
   claude-network:

@@ -35,6 +35,41 @@ fi
 
 echo "Starting Claude Chat Service (daemonized)..."
 
+# ---------------------------------------------------------------------------
+# Persistent data directories (bind-mounted into containers)
+# ---------------------------------------------------------------------------
+# These replace Docker named volumes so data survives `docker volume prune`.
+# If the sessions DB is missing and S3_BACKUP_BUCKET is configured, auto-restore.
+DATA_DIR="$SCRIPT_DIR/data"
+mkdir -p "$DATA_DIR/sessions" \
+         "$DATA_DIR/basic-memory" \
+         "$DATA_DIR/proton-bridge/config" \
+         "$DATA_DIR/proton-bridge/gnupg" \
+         "$DATA_DIR/proton-bridge/data" \
+         "$DATA_DIR/proton-bridge/cache" \
+         "$DATA_DIR/proton-bridge/pass"
+
+# Fix ownership for container user (UID 501 = appuser) on Linux
+if [ "$(uname)" = "Linux" ]; then
+    sudo chown -R 501:501 "$DATA_DIR/sessions" "$DATA_DIR/basic-memory" 2>/dev/null || true
+fi
+
+# Auto-restore from S3 if data is empty and bucket is configured
+if [ ! -f "$DATA_DIR/sessions/sessions.db" ]; then
+    # Load S3_BACKUP_BUCKET from .env if not in environment
+    if [ -z "${S3_BACKUP_BUCKET:-}" ] && [ -f "$SCRIPT_DIR/.env" ]; then
+        S3_BACKUP_BUCKET=$(grep -E '^S3_BACKUP_BUCKET=' "$SCRIPT_DIR/.env" | cut -d'=' -f2- | tr -d '"' | tr -d "'" || true)
+    fi
+    if [ -n "${S3_BACKUP_BUCKET:-}" ] && command -v aws &>/dev/null; then
+        echo "No local data found — restoring from S3 backup..."
+        bash "$SCRIPT_DIR/backup.sh" pull
+    else
+        echo "No existing data found. Starting fresh."
+        echo "  Tip: Set S3_BACKUP_BUCKET in .env and run 'bash backup.sh pull' to restore from backup."
+    fi
+fi
+echo "Data directory: $DATA_DIR"
+
 # Check for .claude directory (needed for authentication)
 if [ ! -d "$HOME/.claude" ]; then
     echo "Warning: $HOME/.claude directory not found"
