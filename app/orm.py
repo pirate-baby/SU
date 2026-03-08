@@ -107,6 +107,21 @@ class UnsubscribedSenderRow(Base):
         return {c.key: getattr(self, c.key) for c in self.__table__.columns}
 
 
+class DocumentRow(Base):
+    __tablename__ = "documents"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    filename: Mapped[str] = mapped_column(String, nullable=False)
+    file_path: Mapped[str] = mapped_column(String, nullable=False)
+    file_size: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[Optional[str]] = mapped_column(String, default=None)
+    updated_at: Mapped[Optional[str]] = mapped_column(String, default=None)
+
+    def to_dict(self) -> dict:
+        return {c.key: getattr(self, c.key) for c in self.__table__.columns}
+
+
 class SuNoteRow(Base):
     __tablename__ = "su_notes"
 

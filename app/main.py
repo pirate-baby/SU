@@ -44,7 +44,7 @@ from app.daemon_registry import (
     daemon_registry, DaemonInfo, DaemonCategory,
     cleanup_stale_runs, get_last_completed_run, get_runs,
 )
-from app.repositories import TaskRepo, EventRepo, InterjectionRepo, SuNoteRepo
+from app.repositories import TaskRepo, EventRepo, InterjectionRepo, SuNoteRepo, DocumentRepo
 from app.deep_learning import (
     DocRepo as DLDocRepo,
     RunRepo as DLRunRepo,
@@ -842,6 +842,73 @@ async def api_deep_learning_documents(status: str | None = None):
 async def api_telegram_status():
     """Return Telegram bot configuration status."""
     return {"configured": bool(settings.telegram_bot_token)}
+
+
+# ---- Documents (markdown editor) ----
+
+@app.get("/docs", response_class=HTMLResponse)
+async def documents_page(request: Request):
+    """Serve the markdown document editor page."""
+    return templates.TemplateResponse("documents.html", {"request": request})
+
+
+class DocumentCreate(BaseModel):
+    title: str
+    content: str = ""
+
+
+class DocumentUpdate(BaseModel):
+    title: str | None = None
+    content: str | None = None
+
+
+@app.get("/api/docs")
+async def api_list_documents():
+    return await DocumentRepo.list()
+
+
+@app.post("/api/docs", status_code=201)
+async def api_create_document(body: DocumentCreate):
+    doc = await DocumentRepo.create(title=body.title, content=body.content)
+    return doc
+
+
+@app.get("/api/docs/{doc_id}")
+async def api_get_document(doc_id: str):
+    doc = await DocumentRepo.get(doc_id)
+    if not doc:
+        raise HTTPException(404, "Document not found")
+    content = await DocumentRepo.get_content(doc_id)
+    return {**doc, "content": content}
+
+
+@app.put("/api/docs/{doc_id}")
+async def api_update_document(doc_id: str, body: DocumentUpdate):
+    doc = await DocumentRepo.get(doc_id)
+    if not doc:
+        raise HTTPException(404, "Document not found")
+    await DocumentRepo.update_content(doc_id, title=body.title, content=body.content)
+    return {"updated": doc_id}
+
+
+@app.delete("/api/docs/{doc_id}")
+async def api_delete_document(doc_id: str):
+    doc = await DocumentRepo.get(doc_id)
+    if not doc:
+        raise HTTPException(404, "Document not found")
+    await DocumentRepo.delete(doc_id)
+    return {"deleted": doc_id}
+
+
+@app.get("/api/docs/{doc_id}/raw")
+async def api_get_document_raw(doc_id: str):
+    """Serve raw markdown content (for SU agent to read locally)."""
+    doc = await DocumentRepo.get(doc_id)
+    if not doc:
+        raise HTTPException(404, "Document not found")
+    content = await DocumentRepo.get_content(doc_id)
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(content or "", media_type="text/markdown")
 
 
 # ---- WebSocket chat ----

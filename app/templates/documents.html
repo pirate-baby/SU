@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SU — Documents</title>
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#0a0a0a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/easymde@2/dist/easymde.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg: #0a0a0a;
+            --surface: #111111;
+            --surface2: #1a1a1a;
+            --border: #2a2a2a;
+            --text: #c8c8c8;
+            --text-muted: #5a5a5a;
+            --green: #33ff33;
+            --green-dim: #1a9e1a;
+            --green-glow: rgba(51, 255, 51, 0.15);
+            --yellow: #cccc33;
+            --red: #ff3333;
+            --blue: #3399ff;
+            --mono: 'IBM Plex Mono', 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+        }
+        body {
+            font-family: var(--mono);
+            background: var(--bg);
+            color: var(--text);
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Top bar */
+        .topbar {
+            height: 48px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            gap: 16px;
+        }
+        .topbar h1 {
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            color: var(--green);
+            text-shadow: 0 0 10px var(--green-glow);
+        }
+        .topbar a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 13px;
+            font-family: var(--mono);
+        }
+        .topbar a:hover { color: var(--green); }
+
+        /* Layout */
+        .layout {
+            display: flex;
+            height: calc(100vh - 48px);
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 280px;
+            min-width: 280px;
+            border-right: 1px solid var(--border);
+            background: var(--surface);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .sidebar-header {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+
+        .sidebar-title {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+        }
+
+        .btn {
+            font-family: var(--mono);
+            font-size: 11px;
+            font-weight: 600;
+            padding: 5px 10px;
+            border: 1px solid var(--border);
+            background: var(--surface2);
+            color: var(--text);
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            transition: border-color 0.15s, color 0.15s;
+        }
+        .btn:hover {
+            border-color: var(--green-dim);
+            color: var(--green);
+        }
+        .btn-primary {
+            border-color: var(--green-dim);
+            color: var(--green);
+        }
+        .btn-primary:hover {
+            background: rgba(51, 255, 51, 0.08);
+        }
+        .btn-danger {
+            border-color: #331111;
+            color: var(--red);
+        }
+        .btn-danger:hover {
+            background: rgba(255, 51, 51, 0.08);
+        }
+
+        .search-box {
+            padding: 8px 16px;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+        .search-box input {
+            width: 100%;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            padding: 6px 10px;
+            font-family: var(--mono);
+            font-size: 12px;
+            color: var(--text);
+            caret-color: var(--green);
+        }
+        .search-box input:focus {
+            outline: none;
+            border-color: var(--green-dim);
+        }
+        .search-box input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .doc-list {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .doc-item {
+            padding: 10px 16px;
+            border-bottom: 1px solid rgba(42, 42, 42, 0.5);
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+        .doc-item:hover { background: rgba(51, 255, 51, 0.03); }
+        .doc-item.active {
+            background: rgba(51, 255, 51, 0.05);
+            border-left: 2px solid var(--green-dim);
+        }
+        .doc-item-title {
+            font-size: 13px;
+            color: var(--text);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .doc-item.active .doc-item-title {
+            color: var(--green);
+        }
+        .doc-item-meta {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 3px;
+            display: flex;
+            gap: 10px;
+        }
+
+        .empty-state {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--text-muted);
+            font-size: 13px;
+            flex-direction: column;
+            gap: 8px;
+            padding: 24px;
+            text-align: center;
+        }
+        .empty-state-sub {
+            font-size: 11px;
+            color: var(--text-muted);
+            opacity: 0.6;
+        }
+
+        /* Main editor area */
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            overflow: hidden;
+        }
+
+        /* Title bar */
+        .title-bar {
+            padding: 12px 20px;
+            border-bottom: 1px solid var(--border);
+            background: var(--surface);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-shrink: 0;
+        }
+        .title-input {
+            flex: 1;
+            background: transparent;
+            border: 1px solid transparent;
+            padding: 6px 10px;
+            font-family: var(--mono);
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--green);
+            caret-color: var(--green);
+        }
+        .title-input:focus {
+            outline: none;
+            border-color: var(--border);
+            background: var(--bg);
+        }
+        .title-input::placeholder { color: var(--text-muted); }
+        .title-input:disabled {
+            color: var(--text-muted);
+            cursor: default;
+        }
+
+        .save-indicator {
+            font-size: 11px;
+            color: var(--text-muted);
+            flex-shrink: 0;
+            min-width: 60px;
+            text-align: right;
+        }
+        .save-indicator.saving { color: var(--yellow); }
+        .save-indicator.saved { color: var(--green-dim); }
+
+        /* Editor container */
+        .editor-wrap {
+            flex: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* No document selected */
+        .no-doc {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 12px;
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+        .no-doc-hint {
+            font-size: 12px;
+            opacity: 0.5;
+        }
+
+        /* EasyMDE theme overrides */
+        .EasyMDEContainer {
+            border: none;
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            min-height: 0;
+        }
+        .EasyMDEContainer .CodeMirror {
+            background: var(--bg);
+            color: var(--text);
+            border: none;
+            border-top: 1px solid var(--border);
+            font-family: var(--mono);
+            font-size: 14px;
+            line-height: 1.6;
+            flex: 1;
+        }
+        .EasyMDEContainer .CodeMirror-scroll {
+            min-height: 0;
+        }
+        .EasyMDEContainer .CodeMirror-cursor {
+            border-left-color: var(--green);
+        }
+        .EasyMDEContainer .CodeMirror-selected {
+            background: rgba(51, 255, 51, 0.15);
+        }
+        .EasyMDEContainer .CodeMirror-focused .CodeMirror-selected {
+            background: rgba(51, 255, 51, 0.2);
+        }
+        .CodeMirror-line::selection, .CodeMirror-line > span::selection,
+        .CodeMirror-line > span > span::selection {
+            background: rgba(51, 255, 51, 0.2);
+        }
+        .editor-toolbar {
+            background: var(--surface);
+            border: none;
+            border-bottom: 1px solid var(--border);
+            padding: 4px 8px;
+            opacity: 1;
+        }
+        .editor-toolbar button {
+            color: var(--text-muted) !important;
+            border: 1px solid transparent;
+            background: none;
+            border-radius: 0;
+            width: 30px;
+            height: 30px;
+        }
+        .editor-toolbar button:hover {
+            color: var(--green) !important;
+            background: var(--surface2);
+            border-color: var(--border);
+        }
+        .editor-toolbar button.active {
+            color: var(--green) !important;
+            background: rgba(51, 255, 51, 0.08);
+        }
+        .editor-toolbar i.separator {
+            border-left-color: var(--border);
+            border-right-color: transparent;
+        }
+        .editor-toolbar.disabled-for-preview button:not(.no-disable) {
+            opacity: 0.3;
+        }
+
+        /* Preview pane */
+        .EasyMDEContainer .editor-preview,
+        .EasyMDEContainer .editor-preview-side {
+            background: var(--surface);
+            color: var(--text);
+            font-family: var(--mono);
+            border: none;
+            border-left: 1px solid var(--border);
+            padding: 20px;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        .editor-preview h1, .editor-preview h2, .editor-preview h3, .editor-preview h4,
+        .editor-preview-side h1, .editor-preview-side h2, .editor-preview-side h3, .editor-preview-side h4 {
+            color: var(--green);
+            font-family: var(--mono);
+            font-weight: 600;
+            margin: 0.9em 0 0.4em;
+        }
+        .editor-preview h1, .editor-preview-side h1 { font-size: 1.15em; }
+        .editor-preview h2, .editor-preview-side h2 { font-size: 1.05em; }
+        .editor-preview h3, .editor-preview-side h3 { font-size: 0.95em; }
+        .editor-preview code, .editor-preview-side code {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            color: var(--yellow);
+            padding: 0.1em 0.35em;
+            font-size: 0.9em;
+            font-family: var(--mono);
+        }
+        .editor-preview pre, .editor-preview-side pre {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-left: 2px solid var(--green-dim);
+            padding: 10px 14px;
+            overflow-x: auto;
+            margin: 0.6em 0;
+        }
+        .editor-preview pre code, .editor-preview-side pre code {
+            background: none;
+            border: none;
+            color: var(--green);
+            padding: 0;
+        }
+        .editor-preview blockquote, .editor-preview-side blockquote {
+            border-left: 2px solid var(--green-dim);
+            margin: 0.5em 0;
+            padding: 0.2em 0.8em;
+            color: var(--text-muted);
+        }
+        .editor-preview a, .editor-preview-side a {
+            color: var(--blue);
+            text-decoration: none;
+        }
+        .editor-preview a:hover, .editor-preview-side a:hover {
+            text-decoration: underline;
+        }
+        .editor-preview strong, .editor-preview-side strong {
+            color: var(--text);
+            font-weight: 600;
+        }
+        .editor-preview ul, .editor-preview ol,
+        .editor-preview-side ul, .editor-preview-side ol {
+            padding-left: 1.4em;
+            margin: 0.4em 0;
+        }
+        .editor-preview hr, .editor-preview-side hr {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 0.8em 0;
+        }
+        .editor-preview table, .editor-preview-side table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 0.5em 0;
+            font-size: 0.88em;
+        }
+        .editor-preview th, .editor-preview td,
+        .editor-preview-side th, .editor-preview-side td {
+            border: 1px solid var(--border);
+            padding: 4px 10px;
+            text-align: left;
+        }
+        .editor-preview th, .editor-preview-side th {
+            background: var(--surface2);
+            color: var(--green);
+        }
+        .editor-preview img, .editor-preview-side img {
+            max-width: 100%;
+        }
+
+        /* Checklist support */
+        .editor-preview input[type="checkbox"],
+        .editor-preview-side input[type="checkbox"] {
+            margin-right: 6px;
+        }
+
+        /* CodeMirror markdown syntax highlighting */
+        .cm-header { color: var(--green) !important; font-weight: 600; }
+        .cm-strong { color: var(--text) !important; font-weight: 700; }
+        .cm-em { color: var(--text-muted) !important; font-style: italic; }
+        .cm-link { color: var(--blue) !important; }
+        .cm-url { color: var(--text-muted) !important; }
+        .cm-comment { color: var(--text-muted) !important; }
+        .cm-quote { color: var(--text-muted) !important; font-style: italic; }
+        .cm-tag { color: var(--yellow) !important; }
+        .cm-attribute { color: var(--green-dim) !important; }
+        .cm-string { color: var(--yellow) !important; }
+
+        /* Footer bar */
+        .footer-bar {
+            padding: 8px 20px;
+            border-top: 1px solid var(--border);
+            background: var(--surface);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+        .footer-meta {
+            font-size: 11px;
+            color: var(--text-muted);
+            display: flex;
+            gap: 16px;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .sidebar { display: none; }
+            .sidebar.open { display: flex; position: absolute; z-index: 10; height: calc(100vh - 48px); }
+        }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <h1>SU // Documents</h1>
+        <a href="/">Home</a>
+        <a href="/planner">Planner</a>
+        <a href="/sessions">Sessions</a>
+        <a href="/daemons">Daemons</a>
+        <a href="/deep-learning">Deep Learning</a>
+    </div>
+
+    <div class="layout">
+        <div class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <span class="sidebar-title">Documents</span>
+                <button class="btn btn-primary" id="btn-new">+ New</button>
+            </div>
+            <div class="search-box">
+                <input type="text" id="search-input" placeholder="Search...">
+            </div>
+            <div class="doc-list" id="doc-list">
+                <div class="empty-state">
+                    <span>No documents yet</span>
+                    <span class="empty-state-sub">Click "+ New" to create one</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="main" id="main-area">
+            <!-- Title bar (hidden when no doc selected) -->
+            <div class="title-bar" id="title-bar" style="display:none;">
+                <input type="text" class="title-input" id="title-input" placeholder="Document title...">
+                <span class="save-indicator" id="save-indicator"></span>
+            </div>
+
+            <!-- Editor (hidden when no doc selected) -->
+            <div class="editor-wrap" id="editor-wrap" style="display:none;">
+                <textarea id="editor-textarea"></textarea>
+            </div>
+
+            <!-- Footer (hidden when no doc selected) -->
+            <div class="footer-bar" id="footer-bar" style="display:none;">
+                <div class="footer-meta" id="footer-meta"></div>
+                <button class="btn btn-danger" id="btn-delete">Delete</button>
+            </div>
+
+            <!-- No doc selected -->
+            <div class="no-doc" id="no-doc">
+                <span>Select or create a document</span>
+                <span class="no-doc-hint">Markdown files are stored on disk at /data/documents/</span>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/easymde@2/dist/easymde.min.js"></script>
+    <script>
+    (function() {
+        const docListEl = document.getElementById('doc-list');
+        const titleBar = document.getElementById('title-bar');
+        const editorWrap = document.getElementById('editor-wrap');
+        const footerBar = document.getElementById('footer-bar');
+        const noDoc = document.getElementById('no-doc');
+        const titleInput = document.getElementById('title-input');
+        const saveIndicator = document.getElementById('save-indicator');
+        const footerMeta = document.getElementById('footer-meta');
+        const searchInput = document.getElementById('search-input');
+        const btnNew = document.getElementById('btn-new');
+        const btnDelete = document.getElementById('btn-delete');
+
+        let editor = null;
+        let currentDocId = null;
+        let documents = [];
+        let saveTimer = null;
+        let titleSaveTimer = null;
+        let dirty = false;
+
+        // ---- Helpers ----
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        function fmtSize(bytes) {
+            if (!bytes) return '0 B';
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / 1048576).toFixed(1) + ' MB';
+        }
+
+        function fmtDate(iso) {
+            if (!iso) return '';
+            const d = new Date(iso);
+            const mon = d.toLocaleString('en-US', { month: 'short' });
+            return `${mon} ${d.getDate()} ${d.toLocaleTimeString('en-US', {
+                hour12: false, hour: '2-digit', minute: '2-digit'
+            })}`;
+        }
+
+        function relativeTime(iso) {
+            if (!iso) return '';
+            const d = new Date(iso);
+            const now = new Date();
+            const diff = now - d;
+            const mins = Math.floor(diff / 60000);
+            if (mins < 1) return 'just now';
+            if (mins < 60) return mins + 'm ago';
+            const hrs = Math.floor(mins / 60);
+            if (hrs < 24) return hrs + 'h ago';
+            const days = Math.floor(hrs / 24);
+            if (days < 7) return days + 'd ago';
+            return fmtDate(iso);
+        }
+
+        // ---- Editor init ----
+
+        function initEditor() {
+            if (editor) return;
+
+            editor = new EasyMDE({
+                element: document.getElementById('editor-textarea'),
+                autofocus: false,
+                spellChecker: false,
+                status: false,
+                toolbar: [
+                    'bold', 'italic', 'heading', '|',
+                    'unordered-list', 'ordered-list', '|',
+                    'link', 'image', 'code', 'quote', 'horizontal-rule', '|',
+                    'preview', 'side-by-side', '|',
+                    'guide'
+                ],
+                sideBySideFullscreen: false,
+                minHeight: '100px',
+                renderingConfig: {
+                    singleLineBreaks: false,
+                    codeSyntaxHighlighting: false,
+                },
+                shortcuts: {
+                    toggleSideBySide: null,   // Disable default Fn key binding
+                    togglePreview: null,
+                },
+            });
+
+            // Auto-save on change (debounced 2s)
+            editor.codemirror.on('change', () => {
+                dirty = true;
+                clearTimeout(saveTimer);
+                saveTimer = setTimeout(() => autoSave(), 2000);
+                saveIndicator.textContent = '';
+                saveIndicator.className = 'save-indicator';
+            });
+
+            // Cmd/Ctrl+S to save immediately
+            editor.codemirror.setOption('extraKeys', {
+                'Cmd-S': function() { autoSave(); },
+                'Ctrl-S': function() { autoSave(); },
+            });
+
+            // Save on blur
+            editor.codemirror.on('blur', () => {
+                if (dirty) autoSave();
+            });
+        }
+
+        // ---- Data operations ----
+
+        async function loadDocuments() {
+            try {
+                const resp = await fetch('/api/docs');
+                documents = await resp.json();
+                renderDocList();
+            } catch (err) {
+                console.error('Failed to load documents:', err);
+            }
+        }
+
+        async function selectDocument(docId) {
+            // Save current doc first
+            if (dirty && currentDocId) {
+                await autoSave();
+            }
+
+            currentDocId = docId;
+
+            try {
+                const resp = await fetch(`/api/docs/${docId}`);
+                if (!resp.ok) throw new Error('Not found');
+                const doc = await resp.json();
+
+                // Show editor
+                titleBar.style.display = 'flex';
+                editorWrap.style.display = 'flex';
+                footerBar.style.display = 'flex';
+                noDoc.style.display = 'none';
+
+                // Init editor if needed
+                initEditor();
+
+                // Load content
+                titleInput.value = doc.title || '';
+                titleInput.disabled = false;
+                editor.value(doc.content || '');
+                dirty = false;
+                saveIndicator.textContent = '';
+                saveIndicator.className = 'save-indicator';
+
+                // Footer
+                footerMeta.innerHTML = `
+                    <span>${fmtSize(doc.file_size)}</span>
+                    <span>Created ${fmtDate(doc.created_at)}</span>
+                    <span>Updated ${relativeTime(doc.updated_at)}</span>
+                `;
+
+                // Highlight in sidebar
+                renderDocList();
+
+                // Focus editor
+                setTimeout(() => editor.codemirror.focus(), 50);
+            } catch (err) {
+                console.error('Failed to load document:', err);
+            }
+        }
+
+        async function createDocument() {
+            const title = prompt('Document title:', 'Untitled');
+            if (title === null) return;
+
+            try {
+                const resp = await fetch('/api/docs', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: title || 'Untitled', content: '' }),
+                });
+                if (!resp.ok) throw new Error('Failed to create');
+                const doc = await resp.json();
+                await loadDocuments();
+                selectDocument(doc.id);
+            } catch (err) {
+                alert('Failed to create document: ' + err.message);
+            }
+        }
+
+        async function autoSave() {
+            if (!currentDocId || !editor) return;
+            dirty = false;
+            clearTimeout(saveTimer);
+
+            saveIndicator.textContent = 'Saving...';
+            saveIndicator.className = 'save-indicator saving';
+
+            try {
+                const resp = await fetch(`/api/docs/${currentDocId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        title: titleInput.value || 'Untitled',
+                        content: editor.value(),
+                    }),
+                });
+                if (!resp.ok) throw new Error('Save failed');
+
+                saveIndicator.textContent = 'Saved';
+                saveIndicator.className = 'save-indicator saved';
+
+                // Refresh sidebar to update timestamps/sizes
+                await loadDocuments();
+            } catch (err) {
+                saveIndicator.textContent = 'Save failed';
+                saveIndicator.className = 'save-indicator';
+                saveIndicator.style.color = 'var(--red)';
+                console.error('Auto-save failed:', err);
+            }
+        }
+
+        async function deleteDocument() {
+            if (!currentDocId) return;
+            const doc = documents.find(d => d.id === currentDocId);
+            const name = doc ? doc.title : 'this document';
+            if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+
+            try {
+                await fetch(`/api/docs/${currentDocId}`, { method: 'DELETE' });
+                currentDocId = null;
+                dirty = false;
+
+                // Hide editor
+                titleBar.style.display = 'none';
+                editorWrap.style.display = 'none';
+                footerBar.style.display = 'none';
+                noDoc.style.display = 'flex';
+
+                if (editor) editor.value('');
+                titleInput.value = '';
+
+                await loadDocuments();
+            } catch (err) {
+                alert('Failed to delete: ' + err.message);
+            }
+        }
+
+        // ---- Rendering ----
+
+        function renderDocList() {
+            const query = searchInput.value.toLowerCase().trim();
+            const filtered = query
+                ? documents.filter(d => d.title.toLowerCase().includes(query))
+                : documents;
+
+            if (!filtered.length) {
+                if (query) {
+                    docListEl.innerHTML = '<div class="empty-state"><span>No matches</span></div>';
+                } else {
+                    docListEl.innerHTML = '<div class="empty-state"><span>No documents yet</span><span class="empty-state-sub">Click "+ New" to create one</span></div>';
+                }
+                return;
+            }
+
+            docListEl.innerHTML = filtered.map(d => `
+                <div class="doc-item${d.id === currentDocId ? ' active' : ''}" data-id="${d.id}">
+                    <div class="doc-item-title">${escapeHtml(d.title)}</div>
+                    <div class="doc-item-meta">
+                        <span>${relativeTime(d.updated_at)}</span>
+                        <span>${fmtSize(d.file_size)}</span>
+                    </div>
+                </div>
+            `).join('');
+
+            // Bind clicks
+            docListEl.querySelectorAll('.doc-item').forEach(el => {
+                el.addEventListener('click', () => selectDocument(el.dataset.id));
+            });
+        }
+
+        // ---- Event bindings ----
+
+        btnNew.addEventListener('click', createDocument);
+        btnDelete.addEventListener('click', deleteDocument);
+
+        searchInput.addEventListener('input', () => renderDocList());
+
+        // Save title on change (debounced)
+        titleInput.addEventListener('input', () => {
+            dirty = true;
+            clearTimeout(titleSaveTimer);
+            titleSaveTimer = setTimeout(() => autoSave(), 1500);
+        });
+
+        // Keyboard shortcut: Cmd/Ctrl+N for new doc
+        document.addEventListener('keydown', (e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+                // Only intercept if not in editor
+                if (document.activeElement !== editor?.codemirror?.getInputField()) {
+                    e.preventDefault();
+                    createDocument();
+                }
+            }
+        });
+
+        // ---- Boot ----
+        loadDocuments();
+    })();
+    </script>
+</body>
+</html>

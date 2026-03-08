@@ -13,6 +13,7 @@
 # Data layout in S3:
 #   s3://$S3_BACKUP_BUCKET/
 #     sessions/sessions.db        (SQLite database + WAL)
+#     sessions/documents/         (markdown files from web editor)
 #     basic-memory/               (knowledge base files)
 #     proton-bridge/              (bridge auth state)
 
@@ -74,6 +75,7 @@ case "$ACTION" in
 
         # Create data directories (Docker bind mounts need these to exist)
         mkdir -p "$DATA_DIR/sessions" \
+                 "$DATA_DIR/sessions/documents" \
                  "$DATA_DIR/basic-memory" \
                  "$DATA_DIR/proton-bridge/config" \
                  "$DATA_DIR/proton-bridge/gnupg" \
@@ -88,7 +90,7 @@ case "$ACTION" in
         # Only needed on Linux (Docker Desktop on macOS handles this transparently)
         if [ "$(uname)" = "Linux" ]; then
             echo "  Fixing ownership for container UID 501..."
-            sudo chown -R 501:501 "$DATA_DIR/sessions" "$DATA_DIR/basic-memory" 2>/dev/null || true
+            sudo chown -R 501:501 "$DATA_DIR/sessions" "$DATA_DIR/sessions/documents" "$DATA_DIR/basic-memory" 2>/dev/null || true
         fi
 
         echo "Done. Data restored to $DATA_DIR/"

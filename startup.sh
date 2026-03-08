@@ -42,6 +42,7 @@ echo "Starting Claude Chat Service (daemonized)..."
 # If the sessions DB is missing and S3_BACKUP_BUCKET is configured, auto-restore.
 DATA_DIR="$SCRIPT_DIR/data"
 mkdir -p "$DATA_DIR/sessions" \
+         "$DATA_DIR/sessions/documents" \
          "$DATA_DIR/basic-memory" \
          "$DATA_DIR/proton-bridge/config" \
          "$DATA_DIR/proton-bridge/gnupg" \
@@ -51,7 +52,7 @@ mkdir -p "$DATA_DIR/sessions" \
 
 # Fix ownership for container user (UID 501 = appuser) on Linux
 if [ "$(uname)" = "Linux" ]; then
-    sudo chown -R 501:501 "$DATA_DIR/sessions" "$DATA_DIR/basic-memory" 2>/dev/null || true
+    sudo chown -R 501:501 "$DATA_DIR/sessions" "$DATA_DIR/sessions/documents" "$DATA_DIR/basic-memory" 2>/dev/null || true
 fi
 
 # Auto-restore from S3 if data is empty and bucket is configured

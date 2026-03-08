@@ -345,4 +345,22 @@ async def init_database():
             ON health_snapshots(timestamp)
         """)
 
+        # -- Documents (markdown files authored in the web editor) --
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS documents (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                file_size INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_documents_updated_at
+            ON documents(updated_at DESC)
+        """)
+
         await db.commit()

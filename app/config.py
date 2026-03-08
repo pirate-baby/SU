@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     # Deep Learning Mode
     deep_learning_dir: str = "/data/deep-learning"
 
+    # Documents (markdown editor)
+    documents_dir: str = "/data/documents"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

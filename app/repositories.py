@@ -1,16 +1,19 @@
 """
-Repository layer: SQLAlchemy ORM-based CRUD for tasks, events, and interjections.
+Repository layer: SQLAlchemy ORM-based CRUD for tasks, events, interjections, and documents.
 """
 from __future__ import annotations
 
+import re as _re
 import uuid
+from pathlib import Path
 from typing import Any, Optional
 
 from sqlalchemy import select, update, delete
 
+from app.config import settings
 from app.database import async_session
 from app.models import Task, Event, Interjection, SuNote
-from app.orm import TaskRow, EventRow, InterjectionRow, SuNoteRow, UnsubscribedSenderRow
+from app.orm import TaskRow, EventRow, InterjectionRow, SuNoteRow, UnsubscribedSenderRow, DocumentRow
 from app.tz import now_iso
 
 
@@ -515,5 +518,113 @@ class UnsubscribedSenderRepo:
                 .order_by(UnsubscribedSenderRow.created_at.desc())
                 .limit(limit)
             )
+            return [row.to_dict() for row in result.scalars().all()]
+
+
+# ---------------------------------------------------------------------------
+# Documents (markdown files authored in the web editor)
+# ---------------------------------------------------------------------------
+
+def _slugify(text: str) -> str:
+    """Convert a title to a filesystem-safe slug."""
+    slug = text.lower().strip()
+    slug = _re.sub(r'[^\w\s-]', '', slug)
+    slug = _re.sub(r'[\s_]+', '-', slug)
+    slug = slug.strip('-')
+    return slug[:80] or "untitled"
+
+
+class DocumentRepo:
+    """CRUD operations for documents table + file I/O on disk."""
+
+    DOCS_DIR = Path(settings.documents_dir)
+
+    @classmethod
+    def ensure_dir(cls) -> Path:
+        cls.DOCS_DIR.mkdir(parents=True, exist_ok=True)
+        return cls.DOCS_DIR
+
+    @staticmethod
+    async def create(title: str, content: str = "") -> dict[str, Any]:
+        doc_id = str(uuid.uuid4())
+        now = _now()
+        slug = _slugify(title)
+        filename = f"{slug}.md"
+        docs_dir = DocumentRepo.ensure_dir()
+        file_path = docs_dir / f"{doc_id[:8]}_{filename}"
+        file_path.write_text(content, encoding="utf-8")
+        file_size = len(content.encode("utf-8"))
+
+        row = DocumentRow(
+            id=doc_id, title=title, filename=filename,
+            file_path=str(file_path), file_size=file_size,
+            created_at=now, updated_at=now,
+        )
+        async with async_session() as session:
+            session.add(row)
+            await session.commit()
+        return row.to_dict()
+
+    @staticmethod
+    async def get(doc_id: str) -> Optional[dict[str, Any]]:
+        async with async_session() as session:
+            result = await session.execute(
+                select(DocumentRow).where(DocumentRow.id == doc_id)
+            )
+            row = result.scalar_one_or_none()
+            return row.to_dict() if row else None
+
+    @staticmethod
+    async def get_content(doc_id: str) -> Optional[str]:
+        doc = await DocumentRepo.get(doc_id)
+        if not doc:
+            return None
+        file_path = Path(doc["file_path"])
+        if not file_path.exists():
+            return ""
+        return file_path.read_text(encoding="utf-8")
+
+    @staticmethod
+    async def update_content(doc_id: str, title: Optional[str] = None,
+                             content: Optional[str] = None) -> None:
+        values: dict[str, Any] = {"updated_at": _now()}
+        if title is not None:
+            values["title"] = title
+
+        if content is not None:
+            doc = await DocumentRepo.get(doc_id)
+            if doc:
+                file_path = Path(doc["file_path"])
+                file_path.write_text(content, encoding="utf-8")
+                values["file_size"] = len(content.encode("utf-8"))
+
+        async with async_session() as session:
+            await session.execute(
+                update(DocumentRow).where(DocumentRow.id == doc_id).values(**values)
+            )
+            await session.commit()
+
+    @staticmethod
+    async def delete(doc_id: str) -> None:
+        doc = await DocumentRepo.get(doc_id)
+        if doc:
+            file_path = Path(doc["file_path"])
+            if file_path.exists():
+                file_path.unlink()
+        async with async_session() as session:
+            await session.execute(
+                delete(DocumentRow).where(DocumentRow.id == doc_id)
+            )
+            await session.commit()
+
+    @staticmethod
+    async def list(limit: int = 100) -> list[dict[str, Any]]:
+        stmt = (
+            select(DocumentRow)
+            .order_by(DocumentRow.updated_at.desc())
+            .limit(limit)
+        )
+        async with async_session() as session:
+            result = await session.execute(stmt)
             return [row.to_dict() for row in result.scalars().all()]
 

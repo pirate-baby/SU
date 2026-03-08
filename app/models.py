@@ -86,6 +86,16 @@ class Interjection(BaseModel):
     delivered_at: Optional[datetime] = None
 
 
+class Document(BaseModel):
+    id: Optional[str] = None
+    title: str
+    filename: Optional[str] = None
+    file_path: Optional[str] = None
+    file_size: int = 0
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
 class SuNote(BaseModel):
     id: Optional[str] = None
     content: str
