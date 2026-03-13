@@ -5,6 +5,7 @@ Central module that creates and configures all pydantic-ai Agent instances,
 the shared model, and MCP server connections.
 """
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -12,9 +13,12 @@ from typing import Any
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models import Model
 from pydantic_ai.mcp import MCPServerStdio, MCPServerSSE, MCPServerStreamableHTTP
+from pydantic_ai.toolsets.abstract import AbstractToolset
 
 from app.config import settings
 from app.tz import now as local_now
+
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Model
@@ -74,6 +78,47 @@ model = _build_model()
 
 
 # ---------------------------------------------------------------------------
+# Resilient MCP wrapper — optional servers degrade instead of crashing
+# ---------------------------------------------------------------------------
+
+class ResilientMCP(AbstractToolset):
+    """Wraps an MCP toolset so connection failures log a warning instead of crashing."""
+
+    def __init__(self, inner: AbstractToolset, name: str):
+        super().__init__()
+        self._inner = inner
+        self._name = name
+        self._connected = False
+
+    async def __aenter__(self):
+        try:
+            await self._inner.__aenter__()
+            self._connected = True
+        except Exception as e:
+            log.warning("MCP server %s unavailable, skipping: %s", self._name, e)
+        return self
+
+    async def __aexit__(self, *args):
+        if self._connected:
+            return await self._inner.__aexit__(*args)
+        return None
+
+    @property
+    def id(self) -> str:
+        return self._inner.id
+
+    def get_tools(self, ctx):
+        if not self._connected:
+            return {}
+        return self._inner.get_tools(ctx)
+
+    async def call_tool(self, name, tool_args, ctx, tool):
+        if not self._connected:
+            return f"MCP server {self._name} is not available"
+        return await self._inner.call_tool(name, tool_args, ctx, tool)
+
+
+# ---------------------------------------------------------------------------
 # MCP Servers (shared across agents that need them)
 # ---------------------------------------------------------------------------
 
@@ -82,8 +127,9 @@ def _build_basic_memory_mcp() -> MCPServerStreamableHTTP:
 
 
 def _build_playwright_mcp() -> MCPServerSSE | None:
-    if settings.playwright_mcp_url:
-        return MCPServerSSE(settings.playwright_mcp_url)
+    url = (settings.playwright_mcp_url or "").strip()
+    if url:
+        return MCPServerSSE(url)
     return None
 
 
@@ -199,17 +245,16 @@ def build_chat_agent() -> Agent:
     """Create the main chat agent with all in-process tools and MCP servers."""
     toolsets: list = []
 
-    # MCP servers
-    basic_memory = _build_basic_memory_mcp()
-    toolsets.append(basic_memory)
+    # MCP servers — wrapped in ResilientMCP so connection failures don't crash the agent
+    toolsets.append(ResilientMCP(_build_basic_memory_mcp(), "basic-memory"))
 
     playwright = _build_playwright_mcp()
     if playwright:
-        toolsets.append(playwright)
+        toolsets.append(ResilientMCP(playwright, "playwright"))
 
     protonmail = _build_protonmail_mcp()
     if protonmail:
-        toolsets.append(protonmail)
+        toolsets.append(ResilientMCP(protonmail, "protonmail"))
 
     agent = Agent(
         model,
@@ -318,7 +363,7 @@ def build_scary_agent() -> Agent:
     return Agent(
         model,
         instructions=HEADLESS_SYSTEM_PROMPT,
-        toolsets=[playwright],
+        toolsets=[ResilientMCP(playwright, "playwright")],
     )
 
 
@@ -332,11 +377,10 @@ def build_subconscious_agent(quick: bool = False) -> Agent:
         SUBCONSCIOUS_SYSTEM_PROMPT, SUBCONSCIOUS_QUICK_PROMPT,
     )
 
-    basic_memory = _build_basic_memory_mcp()
     agent = Agent(
         model,
         instructions=SUBCONSCIOUS_QUICK_PROMPT if quick else SUBCONSCIOUS_SYSTEM_PROMPT,
-        toolsets=[basic_memory],
+        toolsets=[ResilientMCP(_build_basic_memory_mcp(), "basic-memory")],
     )
 
     # Register read-only life_manager tools for temporal awareness
@@ -357,11 +401,10 @@ def build_rem_agent(is_checkpoint: bool = False) -> Agent:
         _build_rem_system_prompt, _build_checkpoint_system_prompt,
     )
 
-    basic_memory = _build_basic_memory_mcp()
     agent = Agent(
         model,
         instructions=_build_checkpoint_system_prompt() if is_checkpoint else _build_rem_system_prompt(),
-        toolsets=[basic_memory],
+        toolsets=[ResilientMCP(_build_basic_memory_mcp(), "basic-memory")],
     )
 
     # Register life_manager tools for task/event extraction
@@ -380,7 +423,6 @@ def build_rem_agent(is_checkpoint: bool = False) -> Agent:
 
 def build_calendar_agent() -> Agent:
     """Create agent for calendar check daemon."""
-    basic_memory = _build_basic_memory_mcp()
     agent = Agent(
         model,
         instructions=(
@@ -388,7 +430,7 @@ def build_calendar_agent() -> Agent:
             "knowledge base when it's useful, then queue each reminder with "
             "create_interjection. Be terse. Headless — no clarifying questions."
         ),
-        toolsets=[basic_memory],
+        toolsets=[ResilientMCP(_build_basic_memory_mcp(), "basic-memory")],
     )
 
     from app.life_manager import create_interjection, list_tasks
@@ -404,7 +446,6 @@ def build_calendar_agent() -> Agent:
 
 def build_note_processor_agent() -> Agent:
     """Create agent for note processor daemon."""
-    basic_memory = _build_basic_memory_mcp()
     agent = Agent(
         model,
         instructions=(
@@ -418,7 +459,7 @@ def build_note_processor_agent() -> Agent:
             "for important deadlines. "
             "Headless — no clarifying questions."
         ),
-        toolsets=[basic_memory],
+        toolsets=[ResilientMCP(_build_basic_memory_mcp(), "basic-memory")],
     )
 
     from app.life_manager import (
@@ -440,7 +481,6 @@ def build_note_processor_agent() -> Agent:
 
 def build_email_scanner_agent() -> Agent:
     """Create agent for email scanner daemon."""
-    basic_memory = _build_basic_memory_mcp()
     protonmail = _build_protonmail_mcp()
     if not protonmail:
         raise RuntimeError("ProtonMail not configured")
@@ -460,7 +500,10 @@ def build_email_scanner_agent() -> Agent:
             "are done. "
             "Headless — no clarifying questions."
         ),
-        toolsets=[basic_memory, protonmail],
+        toolsets=[
+            ResilientMCP(_build_basic_memory_mcp(), "basic-memory"),
+            ResilientMCP(protonmail, "protonmail"),
+        ],
     )
 
     from app.life_manager import (
@@ -487,9 +530,9 @@ def build_email_unsubscriber_agent() -> Agent:
         raise RuntimeError("ProtonMail not configured")
 
     playwright = _build_playwright_mcp()
-    toolsets = [protonmail]
+    toolsets: list = [ResilientMCP(protonmail, "protonmail")]
     if playwright:
-        toolsets.append(playwright)
+        toolsets.append(ResilientMCP(playwright, "playwright"))
 
     agent = Agent(
         model,
@@ -516,7 +559,6 @@ def build_email_unsubscriber_agent() -> Agent:
 
 def build_daily_review_agent() -> Agent:
     """Create agent for daily review daemon."""
-    basic_memory = _build_basic_memory_mcp()
     agent = Agent(
         model,
         instructions=(
@@ -525,7 +567,7 @@ def build_daily_review_agent() -> Agent:
             "and anything needing attention. Be concise and useful — no fluff. "
             "Headless — no clarifying questions."
         ),
-        toolsets=[basic_memory],
+        toolsets=[ResilientMCP(_build_basic_memory_mcp(), "basic-memory")],
     )
 
     from app.life_manager import (
@@ -548,9 +590,8 @@ def build_daily_review_agent() -> Agent:
 
 def build_deep_learning_agent(system_prompt: str) -> Agent:
     """Create a short-lived agent for deep learning phases."""
-    basic_memory = _build_basic_memory_mcp()
     return Agent(
         model,
         instructions=system_prompt,
-        toolsets=[basic_memory],
+        toolsets=[ResilientMCP(_build_basic_memory_mcp(), "basic-memory")],
     )
