@@ -100,6 +100,7 @@ class ResilientMCP(AbstractToolset):
 
     async def __aexit__(self, *args):
         if self._connected:
+            self._connected = False
             return await self._inner.__aexit__(*args)
         return None
 

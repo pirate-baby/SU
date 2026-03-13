@@ -263,14 +263,18 @@ async def _handle_text_message(chat_id: int, text: str) -> None:
     context_prefix = await _collect_and_consume_memories(session_id)
     effective_message = (context_prefix + text) if context_prefix else text
 
-    # Stream response from Claude (accumulate — no streaming for Telegram)
+    # Run agent and accumulate response (no streaming for Telegram).
+    # Use send_message_with_tools() — same path the WebSocket handler uses —
+    # so tool-calling agents return text reliably.
     full_response = ""
+    has_error = False
     try:
-        async for event in claude.send_message(effective_message):
+        async for event in claude.send_message_with_tools(effective_message):
             if event["type"] == "text":
                 full_response += event["content"]
             elif event["type"] == "error":
                 log.error("telegram.claude_error", session_id=session_id, content=event["content"])
+                has_error = True
     except Exception:
         log.exception("telegram.claude_stream_failed", session_id=session_id)
         await send_message(chat_id, "Something went wrong. Try again?")
@@ -279,6 +283,8 @@ async def _handle_text_message(chat_id: int, text: str) -> None:
     if full_response.strip():
         await save_message(session_id, "assistant", full_response)
         await send_message(chat_id, full_response)
+    elif has_error:
+        await send_message(chat_id, "Something went wrong. Try again?")
     else:
         log.warning("telegram.empty_response", session_id=session_id)
 
