@@ -451,19 +451,24 @@ class Scheduler:
         log.info("scheduler.email_scanner_starting")
         return await self._run_email_scanner_agent()
 
+    # Maximum emails to process per agent run (keeps context within model
+    # limits).  Each batch spawns a fresh agent with a clean context window.
+    _EMAIL_BATCH_SIZE: int = 10
+    _EMAIL_MAX_BATCHES: int = 20
+
     async def _run_email_scanner_agent(self) -> dict:
         """Spawn a subagent to scan and triage the email inbox.
+
+        Processes emails in batches to stay within the model's context window.
+        Each batch creates a fresh agent so conversation history is reset.
 
         Returns a metadata dict with scan metrics for the daemon run record.
         """
         from app.agents import build_email_scanner_agent
 
         now = local_now()
-        prompt = (
-            f"Current time: {now.isoformat()}\n\n"
-            f"Scan {settings.user_name}'s inbox for ALL emails across all addresses and "
-            "aliases (multiple addresses may be proxied into this account). "
-            "Fetch all emails, not just unread. For each email:\n\n"
+        email_instructions = (
+            "For each email:\n\n"
             "1. If it's actionable (deadline, request, appointment), create a task for the user "
             "and/or a SU note to follow up.\n"
             "2. If it needs a timely response, create a SU note with an appropriate activate_after.\n"
@@ -486,20 +491,49 @@ class Scheduler:
             "  - context_json: JSON string with keys: sender_email, sender_name, "
             "unsubscribe_url (the https:// or mailto: link), email_subject\n"
             "This note will be picked up by the unsubscriber daemon later.\n\n"
-            "The inbox should be EMPTY when you are done.\n\n"
             "Check the knowledge base for context about people/projects mentioned. "
             "Don't create duplicate tasks for things already tracked. "
-            "Store the email subject and sender in context_json on any SU notes you create."
+            "Store the email subject and sender in context_json on any SU notes you create.\n\n"
+            "IMPORTANT: When you are finished, you MUST end your final message with "
+            "exactly one of these markers on its own line:\n"
+            "- [INBOX_EMPTY] — if no emails remain in the inbox\n"
+            "- [MORE_EMAILS] — if there are still unprocessed emails in the inbox"
         )
 
-        try:
-            agent = build_email_scanner_agent()
-            result = await agent.run(prompt)
-            log.info("scheduler.email_scanner_completed")
-            return {"status": "completed"}
-        except Exception:
-            log.exception("scheduler.email_scanner_failed")
-            raise
+        batches_run = 0
+        for batch_num in range(1, self._EMAIL_MAX_BATCHES + 1):
+            prompt = (
+                f"Current time: {now.isoformat()}\n\n"
+                f"Scan {settings.user_name}'s inbox across all addresses and aliases "
+                "(multiple addresses may be proxied into this account). "
+                f"List the emails, then process UP TO {self._EMAIL_BATCH_SIZE} of them. "
+                "Do NOT try to process more than that in a single run.\n\n"
+                f"{email_instructions}"
+            )
+
+            try:
+                agent = build_email_scanner_agent()
+                result = await agent.run(prompt)
+                batches_run = batch_num
+                response = str(result.output).strip()
+                log.info(
+                    "scheduler.email_scanner_batch_completed",
+                    batch=batch_num,
+                )
+
+                # Stop if the agent reports the inbox is empty, or if there's
+                # no clear signal that more emails remain.
+                if "[INBOX_EMPTY]" in response or "[MORE_EMAILS]" not in response:
+                    break
+            except Exception:
+                log.exception("scheduler.email_scanner_failed", batch=batch_num)
+                raise
+
+        log.info(
+            "scheduler.email_scanner_completed",
+            batches=batches_run,
+        )
+        return {"status": "completed", "batches": batches_run}
 
     # ------------------------------------------------------------------
     # Email Unsubscriber: process pending unsubscribe requests
