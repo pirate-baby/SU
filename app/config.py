@@ -13,9 +13,16 @@ class Settings(BaseSettings):
     user_gender: str = "male"  # male | female | neutral
     su_name: str = "SU"
 
-    claude_code_oauth_token: Optional[str] = None
+    # LLM provider: "anthropic" | "together" | "fireworks"
+    llm_provider: str = "together"
+    llm_model: str = "deepseek-ai/DeepSeek-V3"
+
+    # Provider API keys (only the one matching llm_provider is required)
     anthropic_api_key: Optional[str] = None
-    anthropic_model: str = "claude-sonnet-4-6"
+    claude_code_oauth_token: Optional[str] = None
+    together_api_key: Optional[str] = None
+    fireworks_api_key: Optional[str] = None
+
     self_iteration_mode: bool = False
 
     # basic-memory MCP sidecar (streamable-http, started by entrypoint.sh)

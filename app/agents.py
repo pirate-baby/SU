@@ -10,8 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.models.anthropic import AnthropicModel
-from pydantic_ai.providers.anthropic import AnthropicProvider
+from pydantic_ai.models import Model
 from pydantic_ai.mcp import MCPServerStdio, MCPServerSSE, MCPServerStreamableHTTP
 
 from app.config import settings
@@ -21,23 +20,53 @@ from app.tz import now as local_now
 # Model
 # ---------------------------------------------------------------------------
 
-def _build_model() -> AnthropicModel:
-    """Build the AnthropicModel with the configured auth."""
-    provider_kwargs: dict[str, Any] = {}
-    if settings.anthropic_api_key:
-        provider_kwargs["api_key"] = settings.anthropic_api_key
-    elif settings.claude_code_oauth_token:
-        # Use the OAuth token via a pre-built anthropic client
-        import anthropic
-        client = anthropic.AsyncAnthropic(
-            auth_token=settings.claude_code_oauth_token,
-        )
-        provider_kwargs["anthropic_client"] = client
-    # If neither is set, AnthropicProvider will look for ANTHROPIC_API_KEY env var
+def _build_model() -> Model:
+    """Build the LLM model for the configured provider."""
+    provider = settings.llm_provider
+    model_name = settings.llm_model
 
-    return AnthropicModel(
-        settings.anthropic_model,
-        provider=AnthropicProvider(**provider_kwargs),
+    if provider == "anthropic":
+        from pydantic_ai.models.anthropic import AnthropicModel
+        from pydantic_ai.providers.anthropic import AnthropicProvider
+
+        provider_kwargs: dict[str, Any] = {}
+        if settings.anthropic_api_key:
+            provider_kwargs["api_key"] = settings.anthropic_api_key
+        elif settings.claude_code_oauth_token:
+            import anthropic
+            client = anthropic.AsyncAnthropic(
+                auth_token=settings.claude_code_oauth_token,
+            )
+            provider_kwargs["anthropic_client"] = client
+
+        return AnthropicModel(
+            model_name,
+            provider=AnthropicProvider(**provider_kwargs),
+        )
+
+    if provider == "together":
+        from pydantic_ai.models.openai import OpenAIChatModel
+        from pydantic_ai.providers.together import TogetherProvider
+
+        kw: dict[str, Any] = {}
+        if settings.together_api_key:
+            kw["api_key"] = settings.together_api_key
+
+        return OpenAIChatModel(model_name, provider=TogetherProvider(**kw))
+
+    if provider == "fireworks":
+        from pydantic_ai.models.openai import OpenAIChatModel
+        from pydantic_ai.providers.fireworks import FireworksProvider
+
+        kw = {}
+        if settings.fireworks_api_key:
+            kw["api_key"] = settings.fireworks_api_key
+
+        return OpenAIChatModel(model_name, provider=FireworksProvider(**kw))
+
+    raise ValueError(
+        f"Unknown LLM provider: {provider!r}. "
+        f"Supported: anthropic, together, fireworks"
     )
 
 
