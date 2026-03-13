@@ -77,7 +77,7 @@ class SessionState:
         except BaseException as e:
             detail = _unwrap_exception_group(e) if isinstance(e, BaseExceptionGroup) else str(e)
             log.exception("session.send_error", session_id=self.session_id, error=detail)
-            yield {"type": "error", "content": f"Error communicating with Claude: {detail}"}
+            yield {"type": "error", "content": f"Error communicating with LLM: {detail}"}
 
     async def send_message_streaming(self, user_message: str) -> AsyncGenerator[dict[str, Any], None]:
         """Send a message and stream back events in real-time.
@@ -100,7 +100,7 @@ class SessionState:
         except BaseException as e:
             detail = _unwrap_exception_group(e) if isinstance(e, BaseExceptionGroup) else str(e)
             log.exception("session.stream_error", session_id=self.session_id, error=detail)
-            yield {"type": "error", "content": f"Error communicating with Claude: {detail}"}
+            yield {"type": "error", "content": f"Error communicating with LLM: {detail}"}
 
     async def send_message_with_tools(self, user_message: str) -> AsyncGenerator[dict[str, Any], None]:
         """Send a message and yield all events including tool calls/results.
@@ -152,7 +152,7 @@ class SessionState:
         except BaseException as e:
             detail = _unwrap_exception_group(e) if isinstance(e, BaseExceptionGroup) else str(e)
             log.exception("session.send_error", session_id=self.session_id, error=detail)
-            yield {"type": "error", "content": f"Error communicating with Claude: {detail}"}
+            yield {"type": "error", "content": f"Error communicating with LLM: {detail}"}
 
 
 # Live session states keyed by session_id
