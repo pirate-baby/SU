@@ -3,11 +3,11 @@ Background scheduler: periodic tasks for proactive SU behavior.
 
 Jobs:
   - calendar_check: detect upcoming events and spawn a subagent to compose
-    contextual reminders (interjections) for delivery.
-  - interjection_delivery: push pending interjections to connected clients.
-  - note_processor: process SU's internal notes-to-self (every 10 min).
-  - email_scanner: triage inbox via ProtonMail MCP (every 10 min).
-  - email_unsubscriber: process unsubscribe requests from scanner (every 30 min).
+    contextual reminders (interjections) for delivery (hourly).
+  - interjection_delivery: push pending interjections to connected clients (every 1 min).
+  - note_processor: process SU's internal notes-to-self (hourly).
+  - email_scanner: triage inbox via ProtonMail MCP (hourly).
+  - email_unsubscriber: process unsubscribe requests from scanner (every 4 hours).
   - daily_review: compose morning brief from tasks/events/notes (once/day).
 """
 import asyncio
@@ -51,7 +51,7 @@ class Scheduler:
             name="calendar_check",
             display_name="Calendar Check",
             category=DaemonCategory.SCHEDULER,
-            interval_seconds=1800,
+            interval_seconds=3600,
             description="Checks upcoming events, spawns subagent for reminders",
         ))
         daemon_registry.register(DaemonInfo(
@@ -65,7 +65,7 @@ class Scheduler:
             name="note_processor",
             display_name="Note Processor",
             category=DaemonCategory.SCHEDULER,
-            interval_seconds=600,
+            interval_seconds=3600,
             description="Processes SU notes-to-self, spawns subagent for triage",
         ))
         if settings.protonmail_username and settings.protonmail_password:
@@ -73,14 +73,14 @@ class Scheduler:
                 name="email_scanner",
                 display_name="Email Scanner",
                 category=DaemonCategory.SCHEDULER,
-                interval_seconds=600,
+                interval_seconds=3600,
                 description="Triages inbox via ProtonMail, creates tasks and notes",
             ))
             daemon_registry.register(DaemonInfo(
                 name="email_unsubscriber",
                 display_name="Email Unsubscriber",
                 category=DaemonCategory.SCHEDULER,
-                interval_seconds=1800,
+                interval_seconds=14400,
                 description="Processes unsubscribe requests from email scanner via SU notes",
             ))
         daemon_registry.register(DaemonInfo(
@@ -95,12 +95,12 @@ class Scheduler:
             name="health_snapshot",
             display_name="Health Snapshot",
             category=DaemonCategory.SYSTEM,
-            interval_seconds=300,
+            interval_seconds=900,
             description="Collects health metrics and runs retention cleanup",
         ))
 
         self._tasks["calendar_check"] = asyncio.create_task(
-            self._periodic("calendar_check", self._calendar_check, interval=1800),
+            self._periodic("calendar_check", self._calendar_check, interval=3600),
             name="sched-calendar-check",
         )
         self._tasks["interjection_delivery"] = asyncio.create_task(
@@ -108,18 +108,18 @@ class Scheduler:
             name="sched-interjection-delivery",
         )
         self._tasks["note_processor"] = asyncio.create_task(
-            self._periodic("note_processor", self._note_processor, interval=600),
+            self._periodic("note_processor", self._note_processor, interval=3600),
             name="sched-note-processor",
         )
 
         # Email scanner and unsubscriber — only if ProtonMail is configured
         if settings.protonmail_username and settings.protonmail_password:
             self._tasks["email_scanner"] = asyncio.create_task(
-                self._periodic("email_scanner", self._email_scanner, interval=600),
+                self._periodic("email_scanner", self._email_scanner, interval=3600),
                 name="sched-email-scanner",
             )
             self._tasks["email_unsubscriber"] = asyncio.create_task(
-                self._periodic("email_unsubscriber", self._email_unsubscriber, interval=1800),
+                self._periodic("email_unsubscriber", self._email_unsubscriber, interval=14400),
                 name="sched-email-unsubscriber",
             )
 
@@ -129,9 +129,9 @@ class Scheduler:
             name="sched-daily-review",
         )
 
-        # Health snapshot — every 5 minutes
+        # Health snapshot — every 15 minutes
         self._tasks["health_snapshot"] = asyncio.create_task(
-            self._periodic("health_snapshot", self._health_snapshot, interval=300),
+            self._periodic("health_snapshot", self._health_snapshot, interval=900),
             name="sched-health-snapshot",
         )
 
@@ -448,8 +448,47 @@ class Scheduler:
 
     async def _email_scanner(self) -> dict:
         """Scan inbox via ProtonMail MCP and triage emails."""
-        log.info("scheduler.email_scanner_starting")
+        # Quick IMAP check — skip the expensive agent if inbox is empty
+        inbox_count = await self._imap_inbox_count()
+        if inbox_count == 0:
+            log.info("scheduler.email_scanner_skipped", reason="inbox_empty")
+            return {"status": "skipped", "reason": "inbox_empty"}
+
+        log.info("scheduler.email_scanner_starting", inbox_count=inbox_count)
         return await self._run_email_scanner_agent()
+
+    async def _imap_inbox_count(self) -> int:
+        """Lightweight IMAP INBOX message count (no LLM cost)."""
+        import imaplib
+        import ssl
+
+        def _check() -> int:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            conn = imaplib.IMAP4_SSL(
+                settings.protonmail_imap_host,
+                settings.protonmail_imap_port,
+                ssl_context=ctx,
+            )
+            try:
+                conn.login(settings.protonmail_username, settings.protonmail_password)
+                conn.select("INBOX", readonly=True)
+                _, data = conn.search(None, "ALL")
+                ids = data[0].split() if data[0] else []
+                return len(ids)
+            finally:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+
+        try:
+            return await asyncio.to_thread(_check)
+        except Exception:
+            log.exception("scheduler.imap_inbox_count_failed")
+            # If the check fails, assume there might be mail — run the agent
+            return -1
 
     # Maximum emails to process per agent run (keeps context within model
     # limits).  Each batch spawns a fresh agent with a clean context window.
