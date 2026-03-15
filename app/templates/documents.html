@@ -437,7 +437,32 @@
         /* Checklist support */
         .editor-preview input[type="checkbox"],
         .editor-preview-side input[type="checkbox"] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #c8c8c8;
+            border-radius: 2px;
+            background: transparent;
             margin-right: 6px;
+            vertical-align: middle;
+            position: relative;
+            cursor: pointer;
+        }
+        .editor-preview input[type="checkbox"]:checked,
+        .editor-preview-side input[type="checkbox"]:checked {
+            background: var(--green-dim);
+            border-color: var(--green);
+        }
+        .editor-preview input[type="checkbox"]:checked::after,
+        .editor-preview-side input[type="checkbox"]:checked::after {
+            content: '✓';
+            position: absolute;
+            top: -2px;
+            left: 1px;
+            font-size: 13px;
+            color: #fff;
+            font-weight: bold;
         }
 
         /* CodeMirror markdown syntax highlighting */
